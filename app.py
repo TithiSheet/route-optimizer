@@ -18,7 +18,7 @@ st.title("🗺️ Smart Route Optimizer (Fast Version)")
 def load_data():
     try:
         df = pd.read_csv(
-            "bookings3.csv",
+            "bookings.csv",
             encoding="latin1",
             on_bad_lines='skip',
             engine='python'
