@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import random
@@ -6,12 +5,11 @@ import networkx as nx
 import folium
 from streamlit_folium import st_folium
 
+# =========================
+# PAGE SETTINGS
+# =========================
 st.set_page_config(layout="wide")
-
 st.title("🗺️ Smart Route Optimizer (Fast Version)")
-
-import streamlit as st
-import pandas as pd
 
 # =========================
 # LOAD DATA FUNCTION
@@ -26,28 +24,33 @@ def load_data():
             engine='python'
         )
     except Exception as e:
-        st.error(f"Error loading file: {e}")
+        st.error(f"❌ Error loading file: {e}")
         return None
 
+    # Clean columns
     df.columns = df.columns.str.strip()
+
+    # Check required columns
+    required = ['Pickup Location', 'Drop Location', 'Ride Distance']
+    for col in required:
+        if col not in df.columns:
+            st.error(f"❌ Missing column: {col}")
+            return None
+
+    # Clean data
     df['Ride Distance'] = pd.to_numeric(df['Ride Distance'], errors='coerce')
     df = df.dropna(subset=['Ride Distance', 'Pickup Location', 'Drop Location'])
 
     return df
 
-
 # =========================
-# CALL FUNCTION
+# LOAD DATA
 # =========================
 df = load_data()
 
 if df is None or df.empty:
-    st.error("❌ Data not loaded properly")
+    st.error("❌ Dataset not loaded properly. Check CSV file.")
     st.stop()
-
-
-
-
 
 # =========================
 # PREPARE DATA
@@ -55,13 +58,16 @@ if df is None or df.empty:
 cities = sorted(set(df['Pickup Location']).union(set(df['Drop Location'])))
 
 # =========================
-# BUILD GRAPH (CACHED)
+# BUILD GRAPH (FAST CACHE)
 # =========================
 @st.cache_resource
 def build_graph(df):
     G = nx.Graph()
     for _, row in df.iterrows():
-        u, v, d = row['Pickup Location'], row['Drop Location'], row['Ride Distance']
+        u = str(row['Pickup Location']).strip()
+        v = str(row['Drop Location']).strip()
+        d = row['Ride Distance']
+
         if G.has_edge(u, v):
             if d < G[u][v]['weight']:
                 G[u][v]['weight'] = d
@@ -80,7 +86,7 @@ start = col1.selectbox("🟢 Source", cities)
 goal  = col2.selectbox("🔴 Destination", cities)
 
 # =========================
-# EVENTS (FAST)
+# EVENTS (LIGHTWEIGHT)
 # =========================
 def generate_events():
     emap = {}
@@ -95,15 +101,20 @@ def generate_events():
     return emap
 
 # =========================
-# BUTTON ACTION
+# FIND ROUTE BUTTON
 # =========================
 if st.button("🚀 Find Route"):
+
+    if start == goal:
+        st.warning("⚠️ Source and Destination are same!")
+        st.stop()
 
     with st.spinner("⚡ Calculating fast route..."):
 
         event_map = generate_events()
         temp_G = G.copy()
 
+        # Modify graph
         for (u, v), evt in event_map.items():
             if evt == 'BLOCKAGE':
                 if temp_G.has_edge(u, v):
@@ -112,11 +123,12 @@ if st.button("🚀 Find Route"):
                 if temp_G.has_edge(u, v):
                     temp_G[u][v]['weight'] *= 1.5
 
+        # Shortest path
         try:
             path = nx.shortest_path(temp_G, start, goal, weight='weight')
             dist = nx.shortest_path_length(temp_G, start, goal, weight='weight')
         except:
-            st.error("❌ No path found")
+            st.error("❌ No route found!")
             st.stop()
 
     # =========================
@@ -127,13 +139,17 @@ if st.button("🚀 Find Route"):
     stops = len(path) - 1
     time_minutes = (dist / 40) * 60
 
-    st.write(f"📍 Path: {' → '.join(path)}")
-    st.write(f"📏 Distance: {dist:.2f} km")
-    st.write(f"🛑 Stops: {stops}")
-    st.write(f"⏱️ Time: {time_minutes:.0f} mins")
+    colA, colB, colC = st.columns(3)
+
+    colA.metric("📏 Distance", f"{dist:.2f} km")
+    colB.metric("🛑 Stops", stops)
+    colC.metric("⏱️ Time", f"{time_minutes:.0f} mins")
+
+    st.write("### 📍 Path")
+    st.write(" ➝ ".join(path))
 
     # =========================
-    # MAP
+    # MAP (FAST)
     # =========================
     coords = {city: (random.uniform(20, 28), random.uniform(70, 88)) for city in cities}
 
