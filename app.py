@@ -15,7 +15,7 @@ st.title("🗺️ Smart Route Optimizer (Fast Version)")
 # =========================
 @st.cache_data
 def load_data():
-    df = pd.read_csv("bookings3.csv")   # ✅ YOUR FILE NAME
+    df = pd.read_csv("bookings3.csv", encoding="latin1")  # ✅ YOUR FILE NAME
     df['Ride Distance'] = pd.to_numeric(df['Ride Distance'], errors='coerce')
     df = df.dropna(subset=['Ride Distance'])
     return df
