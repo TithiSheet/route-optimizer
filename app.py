@@ -14,28 +14,33 @@ st.title("🗺️ Smart Route Optimizer (Fast Version)")
 # LOAD DATA (FIXED FILE)
 # =========================
 @st.cache_data
-def load_data():
-    try:
-        df = pd.read_csv(
-            "bookings3.csv",
-            encoding="latin1",
-            on_bad_lines='skip',   # ✅ skip broken rows
-            engine='python'        # ✅ more flexible parser
-        )
-    except Exception as e:
-        st.error(f"Error loading file: {e}")
-        return None
+df = load_data()
 
-    # Clean column names (important)
-    df.columns = df.columns.str.strip()
+if df is None or df.empty:
+    st.error("❌ Dataset is empty or failed to load")
+    st.stop()
 
-    # Convert distance safely
-    df['Ride Distance'] = pd.to_numeric(df['Ride Distance'], errors='coerce')
+# Clean column names
+df.columns = df.columns.str.strip()
 
-    # Drop bad rows
-    df = df.dropna(subset=['Ride Distance', 'Pickup Location', 'Drop Location'])
+# Debug: show columns (optional)
+# st.write(df.columns)
 
-    return df
+# Check required columns
+required_cols = ['Pickup Location', 'Drop Location', 'Ride Distance']
+
+for col in required_cols:
+    if col not in df.columns:
+        st.error(f"❌ Missing column: {col}")
+        st.stop()
+
+# Create cities list
+cities = sorted(set(df['Pickup Location']).union(set(df['Drop Location'])))
+
+
+
+
+
 
 # =========================
 # PREPARE DATA
