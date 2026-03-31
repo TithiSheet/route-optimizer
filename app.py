@@ -10,33 +10,40 @@ st.set_page_config(layout="wide")
 
 st.title("🗺️ Smart Route Optimizer (Fast Version)")
 
+import streamlit as st
+import pandas as pd
+
 # =========================
-# LOAD DATA (FIXED FILE)
+# LOAD DATA FUNCTION
 # =========================
 @st.cache_data
+def load_data():
+    try:
+        df = pd.read_csv(
+            "bookings3.csv",
+            encoding="latin1",
+            on_bad_lines='skip',
+            engine='python'
+        )
+    except Exception as e:
+        st.error(f"Error loading file: {e}")
+        return None
+
+    df.columns = df.columns.str.strip()
+    df['Ride Distance'] = pd.to_numeric(df['Ride Distance'], errors='coerce')
+    df = df.dropna(subset=['Ride Distance', 'Pickup Location', 'Drop Location'])
+
+    return df
+
+
+# =========================
+# CALL FUNCTION
+# =========================
 df = load_data()
 
 if df is None or df.empty:
-    st.error("❌ Dataset is empty or failed to load")
+    st.error("❌ Data not loaded properly")
     st.stop()
-
-# Clean column names
-df.columns = df.columns.str.strip()
-
-# Debug: show columns (optional)
-# st.write(df.columns)
-
-# Check required columns
-required_cols = ['Pickup Location', 'Drop Location', 'Ride Distance']
-
-for col in required_cols:
-    if col not in df.columns:
-        st.error(f"❌ Missing column: {col}")
-        st.stop()
-
-# Create cities list
-cities = sorted(set(df['Pickup Location']).union(set(df['Drop Location'])))
-
 
 
 
