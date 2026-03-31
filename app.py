@@ -15,12 +15,27 @@ st.title("🗺️ Smart Route Optimizer (Fast Version)")
 # =========================
 @st.cache_data
 def load_data():
-    df = pd.read_csv("bookings3.csv", encoding="latin1")  # ✅ YOUR FILE NAME
-    df['Ride Distance'] = pd.to_numeric(df['Ride Distance'], errors='coerce')
-    df = df.dropna(subset=['Ride Distance'])
-    return df
+    try:
+        df = pd.read_csv(
+            "bookings3.csv",
+            encoding="latin1",
+            on_bad_lines='skip',   # ✅ skip broken rows
+            engine='python'        # ✅ more flexible parser
+        )
+    except Exception as e:
+        st.error(f"Error loading file: {e}")
+        return None
 
-df = load_data()
+    # Clean column names (important)
+    df.columns = df.columns.str.strip()
+
+    # Convert distance safely
+    df['Ride Distance'] = pd.to_numeric(df['Ride Distance'], errors='coerce')
+
+    # Drop bad rows
+    df = df.dropna(subset=['Ride Distance', 'Pickup Location', 'Drop Location'])
+
+    return df
 
 # =========================
 # PREPARE DATA
