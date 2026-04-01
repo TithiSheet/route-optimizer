@@ -3,12 +3,11 @@ import pandas as pd
 import networkx as nx
 import random
 import folium
-from streamlit_folium import st_folium
-import matplotlib.pyplot as plt
+import streamlit.components.v1 as components
 
 st.set_page_config(layout="wide")
 
-st.title("🗺️ Smart Route Optimizer (Pro)")
+st.title("🗺️ Smart Route Optimizer (Stable UI)")
 
 # =========================
 # LOAD DATA
@@ -45,26 +44,16 @@ def build_graph(df):
 G = build_graph(df)
 
 # =========================
-# SIDEBAR GRAPH (ALWAYS)
-# =========================
-st.sidebar.title("📊 Network Graph")
-
-pos = nx.spring_layout(G, seed=42)
-
-fig, ax = plt.subplots(figsize=(5,4))
-nx.draw(G, pos, node_size=50, ax=ax)
-ax.axis("off")
-
-st.sidebar.pyplot(fig)
-
-# =========================
 # SESSION STATE
 # =========================
-if "map" not in st.session_state:
-    st.session_state.map = None
+if "map_html" not in st.session_state:
+    st.session_state.map_html = None
 
-if "path" not in st.session_state:
-    st.session_state.path = None
+if "distance" not in st.session_state:
+    st.session_state.distance = None
+
+if "stops" not in st.session_state:
+    st.session_state.stops = None
 
 # =========================
 # UI
@@ -75,36 +64,22 @@ start = col1.selectbox("🟢 Source", cities)
 goal  = col2.selectbox("🔴 Destination", cities)
 
 # =========================
-# BUTTONS
+# BUTTON
 # =========================
-b1, b2, b3 = st.columns(3)
-
-if b1.button("🔄 Swap"):
-    start, goal = goal, start
-
-if b2.button("🧹 Clear"):
-    st.session_state.map = None
-    st.session_state.path = None
-
-# =========================
-# FIND ROUTE
-# =========================
-if b3.button("🚀 Find Route"):
-
-    temp_G = G.copy()
+if st.button("🚀 Find Route"):
 
     try:
-        path = nx.shortest_path(temp_G, start, goal, weight='weight')
-        dist = nx.shortest_path_length(temp_G, start, goal, weight='weight')
+        path = nx.shortest_path(G, start, goal, weight='weight')
+        dist = nx.shortest_path_length(G, start, goal, weight='weight')
     except:
         st.error("❌ No path found")
         st.stop()
 
-    # store in session
-    st.session_state.path = path
+    st.session_state.distance = dist
+    st.session_state.stops = len(path) - 1
 
     # =========================
-    # MAP
+    # MAP (STATIC)
     # =========================
     coords = {city: (random.uniform(20, 28), random.uniform(70, 88)) for city in cities}
 
@@ -114,24 +89,40 @@ if b3.button("🚀 Find Route"):
 
     folium.PolyLine(route_coords, color="blue", weight=6).add_to(m)
 
-    folium.Marker(coords[start], tooltip="Start", icon=folium.Icon(color="green")).add_to(m)
-    folium.Marker(coords[goal], tooltip="End", icon=folium.Icon(color="red")).add_to(m)
+    # markers with names
+    folium.Marker(
+        coords[start],
+        popup=f"Start: {start}",
+        tooltip=start,
+        icon=folium.Icon(color="green")
+    ).add_to(m)
 
-    st.session_state.map = m
+    folium.Marker(
+        coords[goal],
+        popup=f"Destination: {goal}",
+        tooltip=goal,
+        icon=folium.Icon(color="red")
+    ).add_to(m)
 
-    # RESULT
-    st.success("✅ Route Found")
-    st.write(f"📏 Distance: {dist:.2f} km")
-    st.write(f"🛑 Stops: {len(path)-1}")
+    # SAVE HTML (NO BLINK)
+    st.session_state.map_html = m._repr_html_()
 
 # =========================
-# 🔥 ALWAYS SHOW MAP
+# 🔴 ALWAYS SHOW RESULT
+# =========================
+if st.session_state.distance is not None:
+    st.success("✅ Route Found")
+    st.write(f"📏 Distance: {st.session_state.distance:.2f} km")
+    st.write(f"🛑 Stops: {st.session_state.stops}")
+
+# =========================
+# 🔵 ALWAYS SHOW MAP (NO BLINK)
 # =========================
 st.subheader("🗺️ Route Map")
 
-if st.session_state.map:
-    st_folium(st.session_state.map, width=1000, height=500)
+if st.session_state.map_html:
+    components.html(st.session_state.map_html, height=500)
 else:
-    # default empty map (ALWAYS visible)
+    # default map
     default_map = folium.Map(location=[22.5, 78.9], zoom_start=5)
-    st_folium(default_map, width=1000, height=500)
+    components.html(default_map._repr_html_(), height=500)
