@@ -7,7 +7,7 @@ import streamlit.components.v1 as components
 
 st.set_page_config(layout="wide")
 
-st.title("🗺️ Smart Route Optimizer (Final Version)")
+st.title("🌍 Smart Route Optimizer")
 
 # =========================
 # LOAD DATA
@@ -69,7 +69,7 @@ goal  = col2.selectbox("🔴 Destination", cities)
 # =========================
 # BUTTON
 # =========================
-if st.button("🚀 Find Route"):
+if st.button("🛣️ Find Route"):
 
     try:
         path = nx.shortest_path(G, start, goal, weight='weight')
