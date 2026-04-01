@@ -4,10 +4,11 @@ import networkx as nx
 import random
 import folium
 from streamlit_folium import st_folium
+import matplotlib.pyplot as plt
 
 st.set_page_config(layout="wide")
 
-st.title("🗺️ Smart Route Optimizer Pro")
+st.title("🗺️ Smart Route Optimizer (Pro)")
 
 # =========================
 # LOAD DATA
@@ -24,17 +25,16 @@ def load_data():
 
 df = load_data()
 
+cities = sorted(set(df['Pickup Location']).union(set(df['Drop Location'])))
+
 # =========================
-# GRAPH
+# BUILD GRAPH
 # =========================
 @st.cache_resource
 def build_graph(df):
     G = nx.Graph()
     for _, row in df.iterrows():
-        u = row['Pickup Location']
-        v = row['Drop Location']
-        d = row['Ride Distance']
-
+        u, v, d = row['Pickup Location'], row['Drop Location'], row['Ride Distance']
         if G.has_edge(u, v):
             if d < G[u][v]['weight']:
                 G[u][v]['weight'] = d
@@ -44,10 +44,27 @@ def build_graph(df):
 
 G = build_graph(df)
 
-cities = sorted(set(df['Pickup Location']).union(set(df['Drop Location'])))
+# =========================
+# SIDEBAR (GRAPH ALWAYS)
+# =========================
+st.sidebar.title("📊 Network Graph (Always Visible)")
+
+pos = nx.spring_layout(G, seed=42)
+
+fig, ax = plt.subplots(figsize=(5, 4))
+ax.set_facecolor("#0d0d1a")
+
+nx.draw_networkx_nodes(G, pos, node_size=80, node_color="#00BFFF", ax=ax)
+nx.draw_networkx_edges(G, pos, alpha=0.3, ax=ax)
+nx.draw_networkx_labels(G, pos, font_size=5, ax=ax)
+
+ax.set_title("City Network", color="white")
+ax.axis("off")
+
+st.sidebar.pyplot(fig)
 
 # =========================
-# SESSION STATE (for buttons)
+# SESSION STATE
 # =========================
 if "start" not in st.session_state:
     st.session_state.start = cities[0]
@@ -97,29 +114,23 @@ def generate_events():
 # =========================
 if b3.button("🚀 Find Route"):
 
-    if start == goal:
-        st.warning("⚠️ Same source and destination")
+    event_map = generate_events()
+    temp_G = G.copy()
+
+    # apply traffic
+    for (u, v), evt in event_map.items():
+        if evt == 'BLOCK':
+            if temp_G.has_edge(u, v):
+                temp_G.remove_edge(u, v)
+        elif evt == 'TRAFFIC':
+            temp_G[u][v]['weight'] *= 1.5
+
+    try:
+        path = nx.shortest_path(temp_G, start, goal, weight='weight')
+        dist = nx.shortest_path_length(temp_G, start, goal, weight='weight')
+    except:
+        st.error("❌ No path found")
         st.stop()
-
-    with st.spinner("⚡ Finding best route..."):
-
-        event_map = generate_events()
-        temp_G = G.copy()
-
-        # apply traffic
-        for (u, v), evt in event_map.items():
-            if evt == 'BLOCK':
-                if temp_G.has_edge(u, v):
-                    temp_G.remove_edge(u, v)
-            elif evt == 'TRAFFIC':
-                temp_G[u][v]['weight'] *= 1.5
-
-        try:
-            path = nx.shortest_path(temp_G, start, goal, weight='weight')
-            dist = nx.shortest_path_length(temp_G, start, goal, weight='weight')
-        except:
-            st.error("❌ No path available")
-            st.stop()
 
     # =========================
     # RESULT
@@ -127,21 +138,21 @@ if b3.button("🚀 Find Route"):
     st.success("✅ Route Found")
 
     colA, colB, colC = st.columns(3)
-    colA.metric("📏 Distance", f"{dist:.2f} km")
-    colB.metric("🛑 Stops", len(path)-1)
-    colC.metric("⏱️ Time", f"{(dist/40)*60:.0f} mins")
+    colA.metric("Distance", f"{dist:.2f} km")
+    colB.metric("Stops", len(path)-1)
+    colC.metric("Time", f"{(dist/40)*60:.0f} mins")
 
-    st.write("### 📍 Route Path")
+    st.write("### 📍 Path")
     st.write(" ➝ ".join(path))
 
     # =========================
-    # MAP (REALISTIC STYLE)
+    # REAL MAP STYLE
     # =========================
     coords = {city: (random.uniform(20, 28), random.uniform(70, 88)) for city in cities}
 
-    m = folium.Map(location=coords[start], zoom_start=6, tiles="CartoDB positron")
+    m = folium.Map(location=coords[start], zoom_start=6, tiles="OpenStreetMap")
 
-    # draw traffic edges
+    # traffic edges
     for (u, v), evt in event_map.items():
         if evt == 'BLOCK':
             continue
@@ -156,20 +167,8 @@ if b3.button("🚀 Find Route"):
     route_coords = [coords[c] for c in path]
     folium.PolyLine(route_coords, color="blue", weight=6).add_to(m)
 
+    # markers
     folium.Marker(coords[start], tooltip="Start", icon=folium.Icon(color="green")).add_to(m)
     folium.Marker(coords[goal], tooltip="End", icon=folium.Icon(color="red")).add_to(m)
 
     st_folium(m, width=1000, height=500)
-
-    # =========================
-    # EXTRA INFO
-    # =========================
-    st.write("### 🚦 Traffic Summary")
-
-    total_edges = len(event_map)
-    traffic = sum(1 for v in event_map.values() if v == 'TRAFFIC')
-    blocked = sum(1 for v in event_map.values() if v == 'BLOCK')
-
-    st.write(f"Traffic Roads: {traffic}")
-    st.write(f"Blocked Roads: {blocked}")
-    st.write(f"Clear Roads: {total_edges - traffic - blocked}")
