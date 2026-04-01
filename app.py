@@ -2,12 +2,13 @@ import streamlit as st
 import pandas as pd
 import networkx as nx
 import folium
-import random
-import streamlit.components.v1 as components
+from streamlit_folium import st_folium
+import requests
+import matplotlib.pyplot as plt
 
 st.set_page_config(layout="wide")
 
-st.title("🗺️ Smart Route Optimizer (Final Version)")
+st.title("🗺️ Smart Route Optimizer (Real Road Version)")
 
 # =========================
 # LOAD DATA
@@ -24,142 +25,98 @@ def load_data():
 
 df = load_data()
 
-cities = sorted(set(df['Pickup Location']).union(set(df['Drop Location'])))
+# =========================
+# GRAPH (LEFT SIDE ALWAYS)
+# =========================
+st.sidebar.title("📊 Network Graph")
 
-# =========================
-# GRAPH
-# =========================
 @st.cache_resource
 def build_graph(df):
     G = nx.Graph()
     for _, row in df.iterrows():
-        u, v, d = row['Pickup Location'], row['Drop Location'], row['Ride Distance']
-        if G.has_edge(u, v):
-            if d < G[u][v]['weight']:
-                G[u][v]['weight'] = d
-        else:
-            G.add_edge(u, v, weight=d)
+        G.add_edge(row['Pickup Location'], row['Drop Location'])
     return G
 
 G = build_graph(df)
 
+fig, ax = plt.subplots(figsize=(3,3))
+pos = nx.spring_layout(G, seed=42)
+nx.draw(G, pos, node_size=20, ax=ax)
+ax.set_title("Cities Network")
+st.sidebar.pyplot(fig)
+
 # =========================
-# SESSION STATE
+# CITY LIST
 # =========================
-if "map_html" not in st.session_state:
-    st.session_state.map_html = None
-
-if "distance" not in st.session_state:
-    st.session_state.distance = None
-
-if "stops" not in st.session_state:
-    st.session_state.stops = None
-
-if "path" not in st.session_state:
-    st.session_state.path = None
+cities = sorted(set(df['Pickup Location']).union(set(df['Drop Location'])))
 
 # =========================
 # UI
 # =========================
 col1, col2 = st.columns(2)
-
 start = col1.selectbox("🟢 Source", cities)
 goal  = col2.selectbox("🔴 Destination", cities)
 
-# =========================
-# BUTTON
-# =========================
-if st.button("🚀 Find Route"):
+c1, c2, c3 = st.columns(3)
 
+if c1.button("🔄 Swap"):
+    start, goal = goal, start
+
+if c2.button("🧹 Clear"):
+    st.rerun()
+
+run = c3.button("🚀 Find Route")
+
+# =========================
+# GET COORDS (FAKE CENTER INDIA)
+# =========================
+coords = {city: (28 + hash(city)%5, 77 + hash(city)%5) for city in cities}
+
+# =========================
+# ROUTE LOGIC
+# =========================
+if run:
     try:
-        path = nx.shortest_path(G, start, goal, weight='weight')
-        dist = nx.shortest_path_length(G, start, goal, weight='weight')
+        path = nx.shortest_path(G, start, goal)
+        dist = nx.shortest_path_length(G, start, goal)
     except:
         st.error("❌ No path found")
         st.stop()
 
-    st.session_state.path = path
-    st.session_state.distance = dist
-    st.session_state.stops = len(path) - 1
+    st.success("✅ Route Found")
+
+    st.write(f"📏 Distance: {dist:.2f} km")
+    st.write(f"🛑 Stops: {len(path)-1}")
 
     # =========================
-    # FIXED COORDS (CONSISTENT)
+    # REAL ROAD ROUTE USING OSRM
     # =========================
-    random.seed(42)
-    coords = {city: (random.uniform(20, 28), random.uniform(70, 88)) for city in cities}
+    route_coords = []
+
+    for i in range(len(path)-1):
+        s = coords[path[i]]
+        d = coords[path[i+1]]
+
+        url = f"http://router.project-osrm.org/route/v1/driving/{s[1]},{s[0]};{d[1]},{d[0]}?overview=full&geometries=geojson"
+
+        res = requests.get(url).json()
+
+        if res.get("routes"):
+            geometry = res["routes"][0]["geometry"]["coordinates"]
+            route_coords += [(lat, lon) for lon, lat in geometry]
 
     # =========================
-    # MAP
+    # MAP (STABLE)
     # =========================
     m = folium.Map(location=coords[start], zoom_start=6)
 
-    # 🔥 DRAW FULL GRAPH (LIGHT)
-    for u, v in G.edges():
-        folium.PolyLine(
-            [coords[u], coords[v]],
-            color="gray",
-            weight=1,
-            opacity=0.3
-        ).add_to(m)
+    if route_coords:
+        folium.PolyLine(route_coords, color="blue", weight=5).add_to(m)
 
-    # 🔥 DRAW ROUTE PATH (MAIN)
-    route_coords = [coords[c] for c in path]
+    folium.Marker(coords[start], popup=f"Start: {start}", icon=folium.Icon(color="green")).add_to(m)
+    folium.Marker(coords[goal], popup=f"End: {goal}", icon=folium.Icon(color="red")).add_to(m)
 
-    folium.PolyLine(
-        route_coords,
-        color="blue",
-        weight=8,
-        opacity=0.9
-    ).add_to(m)
+    st_folium(m, width=900, height=500)
 
-    # 🔥 MARKERS FOR EACH STEP
-    for city in path:
-        folium.CircleMarker(
-            location=coords[city],
-            radius=5,
-            color="yellow",
-            fill=True,
-            fill_color="yellow",
-            popup=city
-        ).add_to(m)
-
-    # START & END MARKERS
-    folium.Marker(
-        coords[start],
-        popup=f"Start: {start}",
-        tooltip=start,
-        icon=folium.Icon(color="green")
-    ).add_to(m)
-
-    folium.Marker(
-        coords[goal],
-        popup=f"Destination: {goal}",
-        tooltip=goal,
-        icon=folium.Icon(color="red")
-    ).add_to(m)
-
-    # SAVE MAP HTML (NO BLINK)
-    st.session_state.map_html = m._repr_html_()
-
-# =========================
-# RESULT (ALWAYS SHOW)
-# =========================
-if st.session_state.distance is not None:
-    st.success("✅ Route Found")
-    st.write(f"📏 Distance: {st.session_state.distance:.2f} km")
-    st.write(f"🛑 Stops: {st.session_state.stops}")
-
-    if st.session_state.path:
-        st.write("### 📍 Route Path")
-        st.write(" ➝ ".join(st.session_state.path))
-
-# =========================
-# MAP (ALWAYS SHOW)
-# =========================
-st.subheader("🗺️ Route Map")
-
-if st.session_state.map_html:
-    components.html(st.session_state.map_html, height=550)
 else:
-    default_map = folium.Map(location=[22.5, 78.9], zoom_start=5)
-    components.html(default_map._repr_html_(), height=550)
+    st.info("Click Find Route")
