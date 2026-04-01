@@ -28,7 +28,7 @@ df = load_data()
 cities = sorted(set(df['Pickup Location']).union(set(df['Drop Location'])))
 
 # =========================
-# BUILD GRAPH
+# GRAPH
 # =========================
 @st.cache_resource
 def build_graph(df):
@@ -45,20 +45,14 @@ def build_graph(df):
 G = build_graph(df)
 
 # =========================
-# SIDEBAR (GRAPH ALWAYS)
+# SIDEBAR GRAPH (ALWAYS)
 # =========================
-st.sidebar.title("📊 Network Graph (Always Visible)")
+st.sidebar.title("📊 Network Graph")
 
 pos = nx.spring_layout(G, seed=42)
 
-fig, ax = plt.subplots(figsize=(5, 4))
-ax.set_facecolor("#0d0d1a")
-
-nx.draw_networkx_nodes(G, pos, node_size=80, node_color="#00BFFF", ax=ax)
-nx.draw_networkx_edges(G, pos, alpha=0.3, ax=ax)
-nx.draw_networkx_labels(G, pos, font_size=5, ax=ax)
-
-ax.set_title("City Network", color="white")
+fig, ax = plt.subplots(figsize=(5,4))
+nx.draw(G, pos, node_size=50, ax=ax)
 ax.axis("off")
 
 st.sidebar.pyplot(fig)
@@ -66,19 +60,19 @@ st.sidebar.pyplot(fig)
 # =========================
 # SESSION STATE
 # =========================
-if "start" not in st.session_state:
-    st.session_state.start = cities[0]
+if "map" not in st.session_state:
+    st.session_state.map = None
 
-if "goal" not in st.session_state:
-    st.session_state.goal = cities[1]
+if "path" not in st.session_state:
+    st.session_state.path = None
 
 # =========================
 # UI
 # =========================
 col1, col2 = st.columns(2)
 
-start = col1.selectbox("🟢 Source", cities, index=cities.index(st.session_state.start))
-goal  = col2.selectbox("🔴 Destination", cities, index=cities.index(st.session_state.goal))
+start = col1.selectbox("🟢 Source", cities)
+goal  = col2.selectbox("🔴 Destination", cities)
 
 # =========================
 # BUTTONS
@@ -86,44 +80,18 @@ goal  = col2.selectbox("🔴 Destination", cities, index=cities.index(st.session
 b1, b2, b3 = st.columns(3)
 
 if b1.button("🔄 Swap"):
-    st.session_state.start, st.session_state.goal = goal, start
-    st.rerun()
+    start, goal = goal, start
 
 if b2.button("🧹 Clear"):
-    st.session_state.start = cities[0]
-    st.session_state.goal = cities[1]
-    st.rerun()
-
-# =========================
-# EVENTS (TRAFFIC)
-# =========================
-def generate_events():
-    emap = {}
-    for u, v in G.edges():
-        r = random.random()
-        if r < 0.08:
-            emap[(u, v)] = 'BLOCK'
-        elif r < 0.25:
-            emap[(u, v)] = 'TRAFFIC'
-        else:
-            emap[(u, v)] = 'CLEAR'
-    return emap
+    st.session_state.map = None
+    st.session_state.path = None
 
 # =========================
 # FIND ROUTE
 # =========================
 if b3.button("🚀 Find Route"):
 
-    event_map = generate_events()
     temp_G = G.copy()
-
-    # apply traffic
-    for (u, v), evt in event_map.items():
-        if evt == 'BLOCK':
-            if temp_G.has_edge(u, v):
-                temp_G.remove_edge(u, v)
-        elif evt == 'TRAFFIC':
-            temp_G[u][v]['weight'] *= 1.5
 
     try:
         path = nx.shortest_path(temp_G, start, goal, weight='weight')
@@ -132,43 +100,38 @@ if b3.button("🚀 Find Route"):
         st.error("❌ No path found")
         st.stop()
 
-    # =========================
-    # RESULT
-    # =========================
-    st.success("✅ Route Found")
-
-    colA, colB, colC = st.columns(3)
-    colA.metric("Distance", f"{dist:.2f} km")
-    colB.metric("Stops", len(path)-1)
-    colC.metric("Time", f"{(dist/40)*60:.0f} mins")
-
-    st.write("### 📍 Path")
-    st.write(" ➝ ".join(path))
+    # store in session
+    st.session_state.path = path
 
     # =========================
-    # REAL MAP STYLE
+    # MAP
     # =========================
     coords = {city: (random.uniform(20, 28), random.uniform(70, 88)) for city in cities}
 
-    m = folium.Map(location=coords[start], zoom_start=6, tiles="OpenStreetMap")
+    m = folium.Map(location=coords[start], zoom_start=6)
 
-    # traffic edges
-    for (u, v), evt in event_map.items():
-        if evt == 'BLOCK':
-            continue
-
-        color = "green"
-        if evt == 'TRAFFIC':
-            color = "orange"
-
-        folium.PolyLine([coords[u], coords[v]], color=color, weight=2).add_to(m)
-
-    # optimal path
     route_coords = [coords[c] for c in path]
+
     folium.PolyLine(route_coords, color="blue", weight=6).add_to(m)
 
-    # markers
     folium.Marker(coords[start], tooltip="Start", icon=folium.Icon(color="green")).add_to(m)
     folium.Marker(coords[goal], tooltip="End", icon=folium.Icon(color="red")).add_to(m)
 
-    st_folium(m, width=1000, height=500)
+    st.session_state.map = m
+
+    # RESULT
+    st.success("✅ Route Found")
+    st.write(f"📏 Distance: {dist:.2f} km")
+    st.write(f"🛑 Stops: {len(path)-1}")
+
+# =========================
+# 🔥 ALWAYS SHOW MAP
+# =========================
+st.subheader("🗺️ Route Map")
+
+if st.session_state.map:
+    st_folium(st.session_state.map, width=1000, height=500)
+else:
+    # default empty map (ALWAYS visible)
+    default_map = folium.Map(location=[22.5, 78.9], zoom_start=5)
+    st_folium(default_map, width=1000, height=500)
