@@ -21,7 +21,7 @@ def load_data():
     df = df.dropna(subset=['Ride Distance', 'Pickup Location', 'Drop Location'])
     return df
 
-df = load_data()
+df = load_data("bookings3.csv")
 
 cities = sorted(set(df['Pickup Location']).union(set(df['Drop Location'])))
 
