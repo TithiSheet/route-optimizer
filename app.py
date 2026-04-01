@@ -81,31 +81,47 @@ if st.button("🚀 Find Route"):
     # =========================
     # MAP (STATIC)
     # =========================
-    coords = {city: (random.uniform(20, 28), random.uniform(70, 88)) for city in cities}
+    # =========================
+# MAP (DETAILED ROUTE)
+# =========================
+coords = {city: (random.uniform(20, 28), random.uniform(70, 88)) for city in cities}
 
-    m = folium.Map(location=coords[start], zoom_start=6)
+m = folium.Map(location=coords[start], zoom_start=6)
 
-    route_coords = [coords[c] for c in path]
+# 🔥 draw step-by-step path
+for i in range(len(path) - 1):
+    u = path[i]
+    v = path[i + 1]
 
-    folium.PolyLine(route_coords, color="blue", weight=6).add_to(m)
-
-    # markers with names
-    folium.Marker(
-        coords[start],
-        popup=f"Start: {start}",
-        tooltip=start,
-        icon=folium.Icon(color="green")
+    folium.PolyLine(
+        [coords[u], coords[v]],
+        color="blue",
+        weight=6,
+        tooltip=f"{u} → {v}"
     ).add_to(m)
 
+# 🔥 add markers for ALL cities in path
+for i, city in enumerate(path):
+
+    if i == 0:
+        color = "green"
+        label = f"Start: {city}"
+    elif i == len(path) - 1:
+        color = "red"
+        label = f"End: {city}"
+    else:
+        color = "blue"
+        label = f"Stop {i}: {city}"
+
     folium.Marker(
-        coords[goal],
-        popup=f"Destination: {goal}",
-        tooltip=goal,
-        icon=folium.Icon(color="red")
+        coords[city],
+        tooltip=label,
+        popup=label,
+        icon=folium.Icon(color=color)
     ).add_to(m)
 
-    # SAVE HTML (NO BLINK)
-    st.session_state.map_html = m._repr_html_()
+# save static map
+st.session_state.map_html = m._repr_html_()
 
 # =========================
 # 🔴 ALWAYS SHOW RESULT
