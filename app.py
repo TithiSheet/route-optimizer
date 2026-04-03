@@ -7,7 +7,7 @@ import streamlit.components.v1 as components
 
 st.set_page_config(layout="wide")
 
-st.title("🌍 Smart Route Optimizer (Accurate Dataset Based)")
+st.title("🌍 Smart Route Optimizer (Correct Distance)")
 
 # =========================
 # LOAD DATA
@@ -15,17 +15,27 @@ st.title("🌍 Smart Route Optimizer (Accurate Dataset Based)")
 @st.cache_data
 def load_data():
     df = pd.read_csv("bookings3.csv", encoding="latin1", on_bad_lines='skip')
+
     df.columns = df.columns.str.strip()
 
+    # Convert to numeric
     df['Ride Distance'] = pd.to_numeric(df['Ride Distance'], errors='coerce')
+
+    # ❗ REMOVE NULL VALUES (IMPORTANT FIX)
     df = df.dropna(subset=['Ride Distance', 'Pickup Location', 'Drop Location'])
 
     return df
 
 df = load_data()
 
+if df.empty:
+    st.error("❌ Dataset not loaded properly")
+    st.stop()
+
+cities = sorted(set(df['Pickup Location']).union(set(df['Drop Location'])))
+
 # =========================
-# BUILD GRAPH (UNDIRECTED)
+# BUILD GRAPH
 # =========================
 @st.cache_resource
 def build_graph(df):
@@ -36,7 +46,7 @@ def build_graph(df):
         v = row['Drop Location']
         d = row['Ride Distance']
 
-        # keep minimum distance if multiple edges
+        # Keep MIN distance if duplicate edge
         if G.has_edge(u, v):
             if d < G[u][v]['weight']:
                 G[u][v]['weight'] = d
@@ -47,17 +57,18 @@ def build_graph(df):
 
 G = build_graph(df)
 
-cities = sorted(set(df['Pickup Location']).union(set(df['Drop Location'])))
-
 # =========================
 # SESSION STATE
 # =========================
 if "map_html" not in st.session_state:
     st.session_state.map_html = None
+
 if "distance" not in st.session_state:
     st.session_state.distance = None
+
 if "stops" not in st.session_state:
     st.session_state.stops = None
+
 if "path" not in st.session_state:
     st.session_state.path = None
 
@@ -70,55 +81,23 @@ start = col1.selectbox("🟢 Source", cities)
 goal  = col2.selectbox("🔴 Destination", cities)
 
 # =========================
-# DISTANCE CALCULATION FUNCTION
-# =========================
-def calculate_distance(path, G):
-    total = 0
-    for i in range(len(path) - 1):
-        u = path[i]
-        v = path[i+1]
-        total += G[u][v]['weight']
-    return total
-
-# =========================
 # BUTTON
 # =========================
 if st.button("🛣️ Find Route"):
 
-    # 🔥 CHECK DIRECT DISTANCE FIRST
-    direct = df[
-        (df['Pickup Location'] == start) &
-        (df['Drop Location'] == goal)
-    ]
+    try:
+        path = nx.shortest_path(G, start, goal, weight='weight')
+        dist = nx.shortest_path_length(G, start, goal, weight='weight')
+    except:
+        st.error("❌ No path found")
+        st.stop()
 
-    reverse = df[
-        (df['Pickup Location'] == goal) &
-        (df['Drop Location'] == start)
-    ]
-
-    if not direct.empty:
-        path = [start, goal]
-        dist = float(direct.iloc[0]['Ride Distance'])
-
-    elif not reverse.empty:
-        path = [start, goal]
-        dist = float(reverse.iloc[0]['Ride Distance'])
-
-    else:
-        try:
-            path = nx.shortest_path(G, start, goal, weight='weight')
-            dist = calculate_distance(path, G)
-        except:
-            st.error("❌ No path found")
-            st.stop()
-
-    # SAVE STATE
     st.session_state.path = path
     st.session_state.distance = dist
     st.session_state.stops = len(path) - 1
 
     # =========================
-    # FIXED COORDS (NO BLINK)
+    # FIXED COORDS
     # =========================
     random.seed(42)
     coords = {city: (random.uniform(20, 28), random.uniform(70, 88)) for city in cities}
@@ -128,25 +107,26 @@ if st.button("🛣️ Find Route"):
     # =========================
     m = folium.Map(location=coords[start], zoom_start=6)
 
-    # FULL GRAPH (LIGHT)
+    # Draw full graph
     for u, v in G.edges():
         folium.PolyLine(
             [coords[u], coords[v]],
             color="gray",
             weight=1,
-            opacity=0.2
+            opacity=0.3
         ).add_to(m)
 
-    # ROUTE PATH (MAIN)
+    # Draw route
     route_coords = [coords[c] for c in path]
 
     folium.PolyLine(
         route_coords,
         color="blue",
-        weight=8
+        weight=8,
+        opacity=0.9
     ).add_to(m)
 
-    # MARKERS
+    # Markers
     for city in path:
         folium.CircleMarker(
             location=coords[city],
@@ -169,6 +149,7 @@ if st.button("🛣️ Find Route"):
         icon=folium.Icon(color="red")
     ).add_to(m)
 
+    # Save map
     st.session_state.map_html = m._repr_html_()
 
 # =========================
@@ -185,7 +166,7 @@ if st.session_state.distance is not None:
         st.write(" ➝ ".join(st.session_state.path))
 
 # =========================
-# MAP
+# MAP DISPLAY
 # =========================
 st.subheader("🗺️ Route Map")
 
