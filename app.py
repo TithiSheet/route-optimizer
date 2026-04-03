@@ -69,18 +69,18 @@ goal  = col2.selectbox("🔴 Destination", cities)
 # =========================
 # BUTTON
 # =========================
-'''if st.button("🛣️ Find Route"):
+#if st.button("🛣️ Find Route"):
 
-    try:
-        path = nx.shortest_path(G, start, goal, weight='weight')
-        dist = nx.shortest_path_length(G, start, goal, weight='weight')
-    except:
-        st.error("❌ No path found")
-        st.stop()
+    #try:
+        #path = nx.shortest_path(G, start, goal, weight='weight')
+        #dist = nx.shortest_path_length(G, start, goal, weight='weight')
+    #except:
+        #st.error("❌ No path found")
+        #st.stop()
 
-    st.session_state.path = path
-    st.session_state.distance = dist
-    st.session_state.stops = len(path) - 1'''
+    #st.session_state.path = path
+    #st.session_state.distance = dist
+    #st.session_state.stops = len(path) - 1'''
 
 if st.button("🛣️ Find Route"):
 
