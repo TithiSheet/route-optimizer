@@ -82,7 +82,7 @@ goal  = col2.selectbox("🔴 Destination", cities)
     st.session_state.distance = dist
     st.session_state.stops = len(path) - 1'''
 
-    if st.button("🛣️ Find Route"):
+if st.button("🛣️ Find Route"):
 
     try:
         path = nx.shortest_path(G, start, goal, weight='weight')
