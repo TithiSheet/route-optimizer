@@ -29,7 +29,7 @@ cities = sorted(set(df['Pickup Location']).union(set(df['Drop Location'])))
 # =========================
 # GRAPH
 # =========================
-@st.cache_resource
+'''@st.cache_resource
 def build_graph(df):
     G = nx.Graph()
     for _, row in df.iterrows():
@@ -39,10 +39,22 @@ def build_graph(df):
                 G[u][v]['weight'] = d
         else:
             G.add_edge(u, v, weight=d)
+    return G'''
+
+@st.cache_resource
+def build_graph(df):
+    G = nx.Graph()
+    # 🔥 take minimum distance for each pair
+    grouped = df.groupby(['Pickup Location', 'Drop Location'])['Ride Distance'].min().reset_index()
+    for _, row in grouped.iterrows():
+        u = row['Pickup Location']
+        v = row['Drop Location']
+        d = row['Ride Distance']
+        G.add_edge(u, v, weight=d)
     return G
+    
 
 G = build_graph(df)
-
 # =========================
 # SESSION STATE
 # =========================
@@ -83,25 +95,28 @@ goal  = col2.selectbox("🔴 Destination", cities)
     #st.session_state.stops = len(path) - 1'''
 
 if st.button("🛣️ Find Route"):
-
     try:
         path = nx.shortest_path(G, start, goal, weight='weight')
     except:
         st.error("❌ No path found")
         st.stop()
-
-    # ✅ CORRECT DISTANCE CALCULATION
-    dist = 0
+    # 🔥 CALCULATE REAL DISTANCE FROM DATASET
+    total_distance = 0
+    segment_details = []
     for i in range(len(path) - 1):
         u = path[i]
         v = path[i + 1]
-
-        # 🔥 get exact weight from graph
-        dist += G[u][v]['weight']
-
+        d = G[u][v]['weight']
+        total_distance += d
+        segment_details.append(f"{u} → {v} = {d:.2f} km")
+    # SAVE
     st.session_state.path = path
-    st.session_state.distance = dist
+    st.session_state.distance = total_distance
     st.session_state.stops = len(path) - 1
+    # SHOW DEBUG (OPTIONAL)
+    st.write("### 📊 Segment Distances")
+    for s in segment_details:
+        st.write(s)
 
     # =========================
     # FIXED COORDS (CONSISTENT)
