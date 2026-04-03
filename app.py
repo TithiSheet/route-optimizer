@@ -17,11 +17,7 @@ def load_data():
     df = pd.read_csv("bookings3.csv", encoding="latin1", on_bad_lines='skip')
     df.columns = df.columns.str.strip()
 
-    # Convert distance
     df['Ride Distance'] = pd.to_numeric(df['Ride Distance'], errors='coerce')
-
-    # ❗ REMOVE ONLY ROWS WHERE DISTANCE IS NULL
-    df = df.dropna(subset=['Ride Distance'])
 
     return df
 
@@ -30,27 +26,53 @@ df = load_data()
 cities = sorted(set(df['Pickup Location']).union(set(df['Drop Location'])))
 
 # =========================
-# GRAPH (PURE DATASET BASED)
+# BUILD GRAPH (ONLY NON-NULL)
 # =========================
 @st.cache_resource
 def build_graph(df):
     G = nx.Graph()
-
     for _, row in df.iterrows():
-        u = row['Pickup Location']
-        v = row['Drop Location']
-        d = row['Ride Distance']
+        u, v, d = row['Pickup Location'], row['Drop Location'], row['Ride Distance']
 
-        # Keep minimum distance if multiple entries exist
-        if G.has_edge(u, v):
-            if d < G[u][v]['weight']:
-                G[u][v]['weight'] = d
-        else:
-            G.add_edge(u, v, weight=d)
-
+        if pd.notna(d):  # only valid distances
+            if G.has_edge(u, v):
+                if d < G[u][v]['weight']:
+                    G[u][v]['weight'] = d
+            else:
+                G.add_edge(u, v, weight=d)
     return G
 
 G = build_graph(df)
+
+# =========================
+# FIND DIRECT DISTANCE (IMPORTANT FIX)
+# =========================
+def get_direct_distance(start, goal):
+    # Direct match
+    direct = df[
+        (df['Pickup Location'] == start) &
+        (df['Drop Location'] == goal)
+    ]
+
+    # Reverse match
+    reverse = df[
+        (df['Pickup Location'] == goal) &
+        (df['Drop Location'] == start)
+    ]
+
+    # Check direct first
+    if not direct.empty:
+        val = direct.iloc[0]['Ride Distance']
+        if pd.notna(val):
+            return val
+
+    # Check reverse
+    if not reverse.empty:
+        val = reverse.iloc[0]['Ride Distance']
+        if pd.notna(val):
+            return val
+
+    return None  # no valid direct distance
 
 # =========================
 # SESSION STATE
@@ -80,25 +102,30 @@ goal  = col2.selectbox("🔴 Destination", cities)
 # =========================
 if st.button("🛣️ Find Route"):
 
-    try:
-        path = nx.shortest_path(G, start, goal, weight='weight')
-    except:
-        st.error("❌ No valid route (missing data)")
-        st.stop()
+    # 🔥 STEP 1: CHECK DIRECT ROUTE FIRST
+    direct_distance = get_direct_distance(start, goal)
 
-    # ✅ EXACT DISTANCE CALCULATION FROM DATASET
-    total_distance = 0
-    for i in range(len(path) - 1):
-        u = path[i]
-        v = path[i+1]
-        total_distance += G[u][v]['weight']
+    if direct_distance is not None:
+        # ✅ USE DATASET VALUE
+        path = [start, goal]
+        dist = direct_distance
 
+    else:
+        # 🔥 STEP 2: USE GRAPH ONLY IF NO DIRECT ROUTE
+        try:
+            path = nx.shortest_path(G, start, goal, weight='weight')
+            dist = nx.shortest_path_length(G, start, goal, weight='weight')
+        except:
+            st.error("❌ No path found")
+            st.stop()
+
+    # SAVE
     st.session_state.path = path
-    st.session_state.distance = total_distance
+    st.session_state.distance = dist
     st.session_state.stops = len(path) - 1
 
     # =========================
-    # FIXED COORDS
+    # FIXED COORDS (NO BLINK)
     # =========================
     random.seed(42)
     coords = {city: (random.uniform(20, 28), random.uniform(70, 88)) for city in cities}
@@ -108,32 +135,46 @@ if st.button("🛣️ Find Route"):
     # =========================
     m = folium.Map(location=coords[start], zoom_start=6)
 
-    # Full graph
+    # LIGHT GRAPH
     for u, v in G.edges():
         folium.PolyLine(
             [coords[u], coords[v]],
             color="gray",
             weight=1,
-            opacity=0.3
+            opacity=0.2
         ).add_to(m)
 
-    # Route
+    # ROUTE PATH
     route_coords = [coords[c] for c in path]
-    folium.PolyLine(route_coords, color="blue", weight=8).add_to(m)
 
-    # Markers
+    folium.PolyLine(
+        route_coords,
+        color="blue",
+        weight=8
+    ).add_to(m)
+
+    # MARKERS
     for city in path:
         folium.CircleMarker(
             location=coords[city],
-            radius=5,
+            radius=6,
             color="yellow",
             fill=True,
             fill_color="yellow",
             popup=city
         ).add_to(m)
 
-    folium.Marker(coords[start], popup=start, icon=folium.Icon(color="green")).add_to(m)
-    folium.Marker(coords[goal], popup=goal, icon=folium.Icon(color="red")).add_to(m)
+    folium.Marker(
+        coords[start],
+        popup=f"Start: {start}",
+        icon=folium.Icon(color="green")
+    ).add_to(m)
+
+    folium.Marker(
+        coords[goal],
+        popup=f"Destination: {goal}",
+        icon=folium.Icon(color="red")
+    ).add_to(m)
 
     st.session_state.map_html = m._repr_html_()
 
@@ -142,6 +183,7 @@ if st.button("🛣️ Find Route"):
 # =========================
 if st.session_state.distance is not None:
     st.success("✅ Route Found")
+
     st.write(f"📏 Distance: {st.session_state.distance:.2f} km")
     st.write(f"🛑 Stops: {st.session_state.stops}")
 
@@ -150,7 +192,7 @@ if st.session_state.distance is not None:
         st.write(" ➝ ".join(st.session_state.path))
 
 # =========================
-# MAP
+# MAP (NO BLINK)
 # =========================
 st.subheader("🗺️ Route Map")
 
