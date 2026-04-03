@@ -69,7 +69,7 @@ goal  = col2.selectbox("🔴 Destination", cities)
 # =========================
 # BUTTON
 # =========================
-if st.button("🛣️ Find Route"):
+'''if st.button("🛣️ Find Route"):
 
     try:
         path = nx.shortest_path(G, start, goal, weight='weight')
@@ -77,6 +77,27 @@ if st.button("🛣️ Find Route"):
     except:
         st.error("❌ No path found")
         st.stop()
+
+    st.session_state.path = path
+    st.session_state.distance = dist
+    st.session_state.stops = len(path) - 1'''
+
+    if st.button("🛣️ Find Route"):
+
+    try:
+        path = nx.shortest_path(G, start, goal, weight='weight')
+    except:
+        st.error("❌ No path found")
+        st.stop()
+
+    # ✅ CORRECT DISTANCE CALCULATION
+    dist = 0
+    for i in range(len(path) - 1):
+        u = path[i]
+        v = path[i + 1]
+
+        # 🔥 get exact weight from graph
+        dist += G[u][v]['weight']
 
     st.session_state.path = path
     st.session_state.distance = dist
