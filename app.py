@@ -4,6 +4,18 @@ import networkx as nx
 import folium
 import random
 import streamlit.components.v1 as components
+from geopy.geocoders import Nominatim
+
+# Initialize geocoder
+geolocator = Nominatim(user_agent="route-app")
+
+@st.cache_data
+def get_coordinates(city):
+    try:
+        location = geolocator.geocode(city + ", India")
+        return (location.latitude, location.longitude)
+    except:
+        return None
 
 st.set_page_config(layout="wide")
 
@@ -129,8 +141,17 @@ if st.button("🛣️ Find Route"):
     # =========================
     # FIXED COORDS
     # =========================
-    random.seed(42)
-    coords = {city: (random.uniform(20, 28), random.uniform(70, 88)) for city in cities}
+    #random.seed(42)
+    #coords = {city: (random.uniform(20, 28), random.uniform(70, 88)) for city in cities}
+    coords = {}
+    for city in cities:
+        coords[city] = get_coordinates(city)
+    coords = {k: v for k, v in coords.items() if v is not None}
+
+    if start not in coords or goal not in coords:
+        st.error("❌ Location not found on map")
+        st.stop()
+    
 
     # =========================
     # MAP
@@ -182,3 +203,5 @@ if st.session_state.map_html:
 else:
     default_map = folium.Map(location=[22.5, 78.9], zoom_start=5)
     components.html(default_map._repr_html_(), height=550)
+
+
