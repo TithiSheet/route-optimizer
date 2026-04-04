@@ -7,7 +7,7 @@ import streamlit.components.v1 as components
 
 st.set_page_config(layout="wide")
 
-st.title("🌍 Smart Route Optimizer (Dynamic AI Routing)")
+st.title("🤖 Smart Route Optimizer (Dynamic + Real Dataset)")
 
 # =========================
 # LOAD DATA
@@ -29,8 +29,11 @@ cities = sorted(set(df['Pickup Location']).union(set(df['Drop Location'])))
 @st.cache_resource
 def build_graph(df):
     G = nx.Graph()
+
     for _, row in df.iterrows():
-        u, v, d = row['Pickup Location'], row['Drop Location'], row['Ride Distance']
+        u = row['Pickup Location']
+        v = row['Drop Location']
+        d = row['Ride Distance']
 
         if pd.notna(d):
             if G.has_edge(u, v):
@@ -38,12 +41,13 @@ def build_graph(df):
                     G[u][v]['weight'] = d
             else:
                 G.add_edge(u, v, weight=d)
+
     return G
 
 G = build_graph(df)
 
 # =========================
-# DIRECT DISTANCE CHECK
+# GET DIRECT DISTANCE
 # =========================
 def get_direct_distance(u, v):
     direct = df[(df['Pickup Location']==u) & (df['Drop Location']==v)]
@@ -58,9 +62,9 @@ def get_direct_distance(u, v):
     return None
 
 # =========================
-# APPLY DYNAMIC CONDITIONS
+# DYNAMIC CONDITIONS
 # =========================
-def apply_dynamic_conditions(G):
+def apply_dynamic(G):
     temp = G.copy()
     events = {}
 
@@ -92,6 +96,7 @@ def apply_dynamic_conditions(G):
 # UI
 # =========================
 col1, col2 = st.columns(2)
+
 start = col1.selectbox("🟢 Source", cities)
 goal  = col2.selectbox("🔴 Destination", cities)
 
@@ -100,68 +105,64 @@ goal  = col2.selectbox("🔴 Destination", cities)
 # =========================
 if st.button("🚀 Find Smart Route"):
 
-    temp_G, events = apply_dynamic_conditions(G)
+    temp_G, events = apply_dynamic(G)
 
-    direct_distance = get_direct_distance(start, goal)
+    direct_dist = get_direct_distance(start, goal)
 
-    # =========================
-    # CHECK DIRECT ROUTE
-    # =========================
     use_direct = False
 
-    if direct_distance is not None:
-        if temp_G.has_edge(start, goal):
-            use_direct = True
+    # Check if direct road exists in dynamic graph
+    if direct_dist is not None and temp_G.has_edge(start, goal):
+        use_direct = True
 
     # =========================
-    # PATH SELECTION
+    # ROUTE LOGIC
     # =========================
     if use_direct:
         path = [start, goal]
-        st.info("📊 Direct route used (no blockage)")
-
+        st.info("📊 Using Direct Route (No Blockage)")
     else:
         try:
             path = nx.shortest_path(temp_G, start, goal, weight='weight')
-            st.warning("⚠️ Direct route unavailable → Alternate path used")
+            st.info("🤖 Using Alternate Route (Dynamic Conditions Applied)")
         except:
-            st.error("❌ No route available")
+            st.error("❌ No route available due to blockages")
             st.stop()
 
     # =========================
-    # CALCULATE DISTANCE
+    # STEP DISTANCE
     # =========================
     total_distance = 0
-    steps = []
+    step_details = []
 
     for i in range(len(path)-1):
-        u, v = path[i], path[i+1]
+        u = path[i]
+        v = path[i+1]
 
-        if temp_G.has_edge(u, v):
+        d = get_direct_distance(u, v)
+
+        if d is None:
             d = temp_G[u][v]['weight']
-        else:
-            d = 0
 
         total_distance += d
-        steps.append((u, v, d, events.get((u, v), events.get((v, u), "UNKNOWN"))))
+        step_details.append((u, v, d))
 
     # =========================
     # OUTPUT
     # =========================
     st.success("✅ Route Found")
+
     st.write(f"📏 Total Distance: {total_distance:.2f} km")
     st.write(f"🛑 Stops: {len(path)-1}")
 
     st.write("### 📍 Route Path")
     st.write(" ➝ ".join(path))
 
-    # =========================
-    # STEP DETAILS WITH EVENTS 🔥
-    # =========================
-    st.write("### 🧭 Step-by-Step Route with Conditions")
+    # Step view
+    st.write("### 🧭 Step-by-Step Route")
 
-    for u, v, d, event in steps:
-        st.write(f"➡ {u} → {v} = {d:.2f} km ({event})")
+    for u, v, d in step_details:
+        st.write(f"➡ {u} → {v} = {d:.2f} km")
 
     # =========================
     # MAP
@@ -171,9 +172,20 @@ if st.button("🚀 Find Smart Route"):
 
     m = folium.Map(location=coords[start], zoom_start=6)
 
-    # draw route with colors
-    for u, v, d, event in steps:
+    # draw full graph
+    for u, v in G.edges():
+        folium.PolyLine(
+            [coords[u], coords[v]],
+            color="gray",
+            weight=1,
+            opacity=0.3
+        ).add_to(m)
 
+    # draw route with dynamic colors
+    for u, v, d in step_details:
+        event = events.get((u, v), "CLEAR")
+
+        color = "blue"
         if "BLOCKED" in event:
             color = "red"
         elif "TRAFFIC" in event:
@@ -181,19 +193,18 @@ if st.button("🚀 Find Smart Route"):
         elif "WEATHER" in event:
             color = "purple"
         elif "ROADWORK" in event:
-            color = "blue"
-        else:
-            color = "green"
+            color = "black"
 
         folium.PolyLine(
             [coords[u], coords[v]],
             color=color,
             weight=6,
-            tooltip=f"{u} → {v} ({event})"
+            tooltip=f"{u} → {v} ({d:.2f} km) {event}"
         ).add_to(m)
 
-    folium.Marker(coords[start], icon=folium.Icon(color="green")).add_to(m)
-    folium.Marker(coords[goal], icon=folium.Icon(color="red")).add_to(m)
+    # markers
+    for city in path:
+        folium.Marker(coords[city], popup=city).add_to(m)
 
     st.session_state.map_html = m._repr_html_()
 
