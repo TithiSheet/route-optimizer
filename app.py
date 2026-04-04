@@ -6,7 +6,8 @@ import random
 import streamlit.components.v1 as components
 
 st.set_page_config(layout="wide")
-st.title("🤖 Smart Route Optimizer (Dynamic + Q-Learning AI)")
+
+st.title("🌍 Smart Route Optimizer (Accurate + Step View)")
 
 # =========================
 # LOAD DATA
@@ -23,123 +24,45 @@ df = load_data()
 cities = sorted(set(df['Pickup Location']).union(set(df['Drop Location'])))
 
 # =========================
-# BUILD GRAPH (WITH NULL HANDLING)
+# BUILD GRAPH (CORRECT)
 # =========================
 @st.cache_resource
 def build_graph(df):
     G = nx.Graph()
 
     for _, row in df.iterrows():
-        u, v, d = row['Pickup Location'], row['Drop Location'], row['Ride Distance']
+        u = row['Pickup Location']
+        v = row['Drop Location']
+        d = row['Ride Distance']
 
-        if pd.notna(d):
-            weight = d
-        else:
-            weight = 10  # default for NULL (IMPORTANT FIX)
+        # NULL handling
+        if pd.isna(d):
+            continue
 
         if G.has_edge(u, v):
-            if weight < G[u][v]['weight']:
-                G[u][v]['weight'] = weight
+            if d < G[u][v]['weight']:
+                G[u][v]['weight'] = d
         else:
-            G.add_edge(u, v, weight=weight)
+            G.add_edge(u, v, weight=d)
 
     return G
 
 G = build_graph(df)
 
 # =========================
-# DYNAMIC CONDITIONS
+# GET EDGE DISTANCE FROM DATASET
 # =========================
-def apply_conditions(G):
-    temp = G.copy()
-    events = {}
+def get_edge_distance(u, v):
+    direct = df[(df['Pickup Location']==u) & (df['Drop Location']==v)]
+    reverse = df[(df['Pickup Location']==v) & (df['Drop Location']==u)]
 
-    for u, v in list(temp.edges()):
-        r = random.random()
+    if not direct.empty and pd.notna(direct.iloc[0]['Ride Distance']):
+        return direct.iloc[0]['Ride Distance']
 
-        if r < 0.08:
-            temp.remove_edge(u, v)
-            events[(u, v)] = "BLOCKED"
+    if not reverse.empty and pd.notna(reverse.iloc[0]['Ride Distance']):
+        return reverse.iloc[0]['Ride Distance']
 
-        elif r < 0.25:
-            temp[u][v]['weight'] *= 1.6
-            events[(u, v)] = "TRAFFIC"
-
-        elif r < 0.40:
-            temp[u][v]['weight'] *= 1.4
-            events[(u, v)] = "WEATHER"
-
-        elif r < 0.55:
-            temp[u][v]['weight'] *= 1.3
-            events[(u, v)] = "ROADWORK"
-
-        else:
-            events[(u, v)] = "CLEAR"
-
-    return temp, events
-
-# =========================
-# Q-LEARNING ROUTE
-# =========================
-def q_learning_route(G, start, goal, episodes=300):
-    Q = {node: {n: 0 for n in G.neighbors(node)} for node in G.nodes()}
-
-    alpha = 0.7
-    gamma = 0.8
-    epsilon = 0.2
-
-    for _ in range(episodes):
-        current = start
-
-        while current != goal:
-            neighbors = list(G.neighbors(current))
-            if not neighbors:
-                break
-
-            if random.random() < epsilon:
-                next_node = random.choice(neighbors)
-            else:
-                next_node = max(Q[current], key=Q[current].get)
-
-            reward = -G[current][next_node]['weight']
-
-            if next_node == goal:
-                reward += 100  # strong reward
-
-            Q[current][next_node] += alpha * (
-                reward + gamma * max(Q[next_node].values(), default=0)
-                - Q[current][next_node]
-            )
-
-            current = next_node
-
-    # BUILD FINAL PATH
-    path = [start]
-    current = start
-
-    visited = set()
-
-    while current != goal:
-        visited.add(current)
-
-        if current not in Q or not Q[current]:
-            break
-
-        next_node = max(Q[current], key=Q[current].get)
-
-        if next_node in visited:
-            break
-
-        path.append(next_node)
-        current = next_node
-
-    return path
-
-# =========================
-# SESSION
-# =========================
-if "map_html" not in st.session_state:
-    st.session_state.map_html = None
+    return None
 
 # =========================
 # UI
@@ -152,70 +75,78 @@ goal  = col2.selectbox("🔴 Destination", cities)
 # =========================
 # BUTTON
 # =========================
-if st.button("🚀 Find Smart Route"):
-
-    temp_G, events = apply_conditions(G)
+if st.button("🚀 Find Route"):
 
     try:
-        # 🔥 ALWAYS USE Q-LEARNING (FOR INTERMEDIATE PATH)
-        path = q_learning_route(temp_G, start, goal)
-
-        # fallback if bad path
-        if len(path) < 2:
-            path = nx.shortest_path(temp_G, start, goal, weight='weight')
-
-        # calculate distance
-        dist = 0
-        for i in range(len(path)-1):
-            dist += temp_G[path[i]][path[i+1]]['weight']
-
+        path = nx.shortest_path(G, start, goal, weight='weight')
     except:
-        st.error("❌ No route available due to dynamic conditions")
+        st.error("❌ No path found")
         st.stop()
+
+    # =========================
+    # CALCULATE DISTANCE STEPWISE
+    # =========================
+    total_distance = 0
+    step_details = []
+
+    for i in range(len(path)-1):
+        u = path[i]
+        v = path[i+1]
+
+        d = get_edge_distance(u, v)
+
+        if d is None:
+            d = G[u][v]['weight']
+
+        total_distance += d
+        step_details.append((u, v, d))
 
     # =========================
     # OUTPUT
     # =========================
-    st.success("✅ Smart Route Found")
+    st.success("✅ Route Found")
 
-    st.write(f"📏 Distance: {dist:.2f} km")
+    st.write(f"📏 Total Distance: {total_distance:.2f} km")
     st.write(f"🛑 Stops: {len(path)-1}")
 
     st.write("### 📍 Route Path")
     st.write(" ➝ ".join(path))
 
     # =========================
-    # MAP WITH DYNAMIC COLORS
+    # STEP BY STEP (IMPORTANT 🔥)
+    # =========================
+    st.write("### 🧭 Step-by-Step Route")
+
+    for u, v, d in step_details:
+        st.write(f"➡ {u} → {v} = {d:.2f} km")
+
+    # =========================
+    # MAP
     # =========================
     random.seed(42)
     coords = {city: (random.uniform(20, 28), random.uniform(70, 88)) for city in cities}
 
     m = folium.Map(location=coords[start], zoom_start=6)
 
-    # DRAW ROUTE WITH CONDITIONS
-    for i in range(len(path)-1):
-        u, v = path[i], path[i+1]
-
-        event = events.get((u, v), events.get((v, u), "CLEAR"))
-
-        if event == "BLOCKED":
-            color = "red"
-        elif event == "TRAFFIC":
-            color = "orange"
-        elif event == "WEATHER":
-            color = "purple"
-        elif event == "ROADWORK":
-            color = "black"
-        else:
-            color = "green"
-
+    # draw full graph light
+    for u, v in G.edges():
         folium.PolyLine(
             [coords[u], coords[v]],
-            color=color,
-            weight=6
+            color="gray",
+            weight=1,
+            opacity=0.3
         ).add_to(m)
 
-    # MARKERS
+    # draw route
+    for u, v, d in step_details:
+        folium.PolyLine(
+            [coords[u], coords[v]],
+            color="blue",
+            weight=6,
+            tooltip=f"{u} → {v} ({d:.2f} km)"
+        ).add_to(m)
+
+    # markers
     for city in path:
         folium.CircleMarker(
             location=coords[city],
@@ -234,22 +165,10 @@ if st.button("🚀 Find Smart Route"):
 # =========================
 # MAP DISPLAY
 # =========================
-st.subheader("🗺️ Dynamic Route Map")
+st.subheader("🗺️ Route Map")
 
-if st.session_state.map_html:
-    components.html(st.session_state.map_html, height=500)
+if "map_html" in st.session_state and st.session_state.map_html:
+    components.html(st.session_state.map_html, height=550)
 else:
     m = folium.Map(location=[22.5, 78.9], zoom_start=5)
-    components.html(m._repr_html_(), height=500)
-
-# =========================
-# LEGEND
-# =========================
-st.markdown("""
-### ⚡ Dynamic Conditions Legend
-- 🔴 Red → Blocked Road  
-- 🟠 Orange → Heavy Traffic  
-- 🟣 Purple → Bad Weather  
-- ⚫ Black → Road Work  
-- 🟢 Green → Clear Route  
-""")
+    components.html(m._repr_html_(), height=550)
