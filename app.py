@@ -3,12 +3,11 @@ import pandas as pd
 import networkx as nx
 import folium
 import random
-from geopy.geocoders import Nominatim
 import streamlit.components.v1 as components
 
 st.set_page_config(layout="wide")
 
-st.title("🌍 Smart Route Optimizer (Dynamic + Real Map)")
+st.title("🤖 Smart Route Optimizer (Q-Learning + Dynamic AI)")
 
 # =========================
 # LOAD DATA
@@ -31,6 +30,7 @@ def build_graph(df):
     G = nx.Graph()
     for _, row in df.iterrows():
         u, v, d = row['Pickup Location'], row['Drop Location'], row['Ride Distance']
+
         if pd.notna(d):
             if G.has_edge(u, v):
                 if d < G[u][v]['weight']:
@@ -42,50 +42,92 @@ def build_graph(df):
 G = build_graph(df)
 
 # =========================
-# REAL COORDINATES (OpenStreetMap)
-# =========================
-geolocator = Nominatim(user_agent="route_app")
-
-@st.cache_data
-def get_coordinates(city):
-    try:
-        location = geolocator.geocode(city + ", India")
-        return (location.latitude, location.longitude)
-    except:
-        return (22.5, 78.9)  # fallback
-
-coords = {city: get_coordinates(city) for city in cities}
-
-# =========================
 # DYNAMIC CONDITIONS
 # =========================
-def apply_dynamic_conditions(G):
+def apply_conditions(G):
     temp = G.copy()
     events = {}
 
-    for u, v in list(temp.edges()):
+    for u, v in temp.edges():
         r = random.random()
 
         if r < 0.05:
             temp.remove_edge(u, v)
-            events[(u, v)] = "🚧 BLOCKED"
+            events[(u, v)] = "BLOCKED"
 
         elif r < 0.20:
             temp[u][v]['weight'] *= 1.5
-            events[(u, v)] = "🚦 TRAFFIC"
+            events[(u, v)] = "TRAFFIC"
 
         elif r < 0.30:
             temp[u][v]['weight'] *= 1.3
-            events[(u, v)] = "🌧 WEATHER"
+            events[(u, v)] = "WEATHER"
 
         elif r < 0.40:
             temp[u][v]['weight'] *= 1.2
-            events[(u, v)] = "🛠 ROAD WORK"
+            events[(u, v)] = "ROADWORK"
 
         else:
-            events[(u, v)] = "✅ CLEAR"
+            events[(u, v)] = "CLEAR"
 
     return temp, events
+
+# =========================
+# Q-LEARNING ROUTE
+# =========================
+def q_learning_route(G, start, goal, episodes=200):
+
+    Q = {}
+
+    for node in G.nodes():
+        Q[node] = {n: 0 for n in G.neighbors(node)}
+
+    alpha = 0.7
+    gamma = 0.8
+    epsilon = 0.2
+
+    for _ in range(episodes):
+        current = start
+
+        while current != goal:
+            neighbors = list(G.neighbors(current))
+            if not neighbors:
+                break
+
+            if random.random() < epsilon:
+                next_node = random.choice(neighbors)
+            else:
+                next_node = max(Q[current], key=Q[current].get)
+
+            reward = -G[current][next_node]['weight']
+
+            if next_node == goal:
+                reward += 50  # reward for reaching goal
+
+            Q[current][next_node] = Q[current][next_node] + alpha * (
+                reward + gamma * max(Q[next_node].values(), default=0)
+                - Q[current][next_node]
+            )
+
+            current = next_node
+
+    # BUILD PATH
+    path = [start]
+    current = start
+
+    while current != goal:
+        if current not in Q or not Q[current]:
+            break
+
+        next_node = max(Q[current], key=Q[current].get)
+
+        if next_node in path:
+            break
+
+        path.append(next_node)
+        current = next_node
+
+    return path
 
 # =========================
 # DIRECT DISTANCE CHECK
@@ -108,84 +150,61 @@ def get_direct_distance(start, goal):
 if "map_html" not in st.session_state:
     st.session_state.map_html = None
 
-if "distance" not in st.session_state:
-    st.session_state.distance = None
-
-if "path" not in st.session_state:
-    st.session_state.path = None
-
 # =========================
 # UI
 # =========================
 col1, col2 = st.columns(2)
+
 start = col1.selectbox("🟢 Source", cities)
 goal  = col2.selectbox("🔴 Destination", cities)
 
 # =========================
 # BUTTON
 # =========================
-if st.button("🚀 Find Smart Route"):
+if st.button("🚀 Find Smart AI Route"):
 
-    # Apply dynamic conditions
-    temp_G, events = apply_dynamic_conditions(G)
+    temp_G, events = apply_conditions(G)
 
-    direct_distance = get_direct_distance(start, goal)
+    direct = get_direct_distance(start, goal)
 
-    # CASE 1: DIRECT
-    if direct_distance is not None:
+    if direct is not None:
         path = [start, goal]
-        dist = direct_distance
-        reason = "Direct dataset route used"
+        dist = direct
+        reason = "📊 Direct dataset route"
 
     else:
-        # CASE 2: DYNAMIC GRAPH
-        try:
-            path = nx.shortest_path(temp_G, start, goal, weight='weight')
+        path = q_learning_route(temp_G, start, goal)
 
-            dist = 0
-            for i in range(len(path)-1):
-                dist += temp_G[path[i]][path[i+1]]['weight']
+        dist = 0
+        for i in range(len(path)-1):
+            dist += temp_G[path[i]][path[i+1]]['weight']
 
-            reason = "Dynamic rerouting applied (traffic/blocks)"
-
-        except:
-            st.error("❌ No route available")
-            st.stop()
-
-    # SAVE
-    st.session_state.path = path
-    st.session_state.distance = dist
+        reason = "🤖 Q-Learning optimized route (dynamic conditions)"
 
     # =========================
-    # RESULT
+    # OUTPUT
     # =========================
     st.success("✅ Smart Route Found")
+
     st.write(f"📏 Distance: {dist:.2f} km")
     st.write(f"🛑 Stops: {len(path)-1}")
 
     st.write("### 📍 Route Path")
     st.write(" ➝ ".join(path))
 
-    # 👉 Explanation
-    st.info(f"🧠 {reason}")
+    st.info(reason)
 
     # =========================
-    # MAP (REAL)
+    # SIMPLE MAP (FAST)
     # =========================
-    m = folium.Map(location=coords[start], zoom_start=10)
+    random.seed(42)
+    coords = {city: (random.uniform(20, 28), random.uniform(70, 88)) for city in cities}
+
+    m = folium.Map(location=coords[start], zoom_start=6)
 
     route_coords = [coords[c] for c in path]
 
-    # Draw route
     folium.PolyLine(route_coords, color="blue", weight=6).add_to(m)
-
-    # Markers
-    for city in path:
-        folium.Marker(
-            coords[city],
-            popup=city,
-            icon=folium.Icon(color="blue")
-        ).add_to(m)
 
     folium.Marker(coords[start], icon=folium.Icon(color="green")).add_to(m)
     folium.Marker(coords[goal], icon=folium.Icon(color="red")).add_to(m)
@@ -193,12 +212,12 @@ if st.button("🚀 Find Smart Route"):
     st.session_state.map_html = m._repr_html_()
 
 # =========================
-# MAP DISPLAY (NO BLINK)
+# MAP DISPLAY
 # =========================
-st.subheader("🗺️ Real Route Map")
+st.subheader("🗺️ Route Map")
 
 if st.session_state.map_html:
-    components.html(st.session_state.map_html, height=550)
+    components.html(st.session_state.map_html, height=500)
 else:
-    default_map = folium.Map(location=[22.5, 78.9], zoom_start=5)
-    components.html(default_map._repr_html_(), height=550)
+    m = folium.Map(location=[22.5, 78.9], zoom_start=5)
+    components.html(m._repr_html_(), height=500)
