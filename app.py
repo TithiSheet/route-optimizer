@@ -6,8 +6,7 @@ import random
 import streamlit.components.v1 as components
 
 st.set_page_config(layout="wide")
-
-st.title("🤖 Smart Route Optimizer (Q-Learning + Dynamic AI)")
+st.title("🤖 Smart Route Optimizer (Dynamic + Q-Learning AI)")
 
 # =========================
 # LOAD DATA
@@ -20,23 +19,30 @@ def load_data():
     return df
 
 df = load_data()
+
 cities = sorted(set(df['Pickup Location']).union(set(df['Drop Location'])))
 
 # =========================
-# BUILD GRAPH
+# BUILD GRAPH (WITH NULL HANDLING)
 # =========================
 @st.cache_resource
 def build_graph(df):
     G = nx.Graph()
+
     for _, row in df.iterrows():
         u, v, d = row['Pickup Location'], row['Drop Location'], row['Ride Distance']
 
         if pd.notna(d):
-            if G.has_edge(u, v):
-                if d < G[u][v]['weight']:
-                    G[u][v]['weight'] = d
-            else:
-                G.add_edge(u, v, weight=d)
+            weight = d
+        else:
+            weight = 10  # default for NULL (IMPORTANT FIX)
+
+        if G.has_edge(u, v):
+            if weight < G[u][v]['weight']:
+                G[u][v]['weight'] = weight
+        else:
+            G.add_edge(u, v, weight=weight)
+
     return G
 
 G = build_graph(df)
@@ -48,23 +54,23 @@ def apply_conditions(G):
     temp = G.copy()
     events = {}
 
-    for u, v in temp.edges():
+    for u, v in list(temp.edges()):
         r = random.random()
 
-        if r < 0.05:
+        if r < 0.08:
             temp.remove_edge(u, v)
             events[(u, v)] = "BLOCKED"
 
-        elif r < 0.20:
-            temp[u][v]['weight'] *= 1.5
+        elif r < 0.25:
+            temp[u][v]['weight'] *= 1.6
             events[(u, v)] = "TRAFFIC"
 
-        elif r < 0.30:
-            temp[u][v]['weight'] *= 1.3
+        elif r < 0.40:
+            temp[u][v]['weight'] *= 1.4
             events[(u, v)] = "WEATHER"
 
-        elif r < 0.40:
-            temp[u][v]['weight'] *= 1.2
+        elif r < 0.55:
+            temp[u][v]['weight'] *= 1.3
             events[(u, v)] = "ROADWORK"
 
         else:
@@ -75,12 +81,8 @@ def apply_conditions(G):
 # =========================
 # Q-LEARNING ROUTE
 # =========================
-def q_learning_route(G, start, goal, episodes=200):
-
-    Q = {}
-
-    for node in G.nodes():
-        Q[node] = {n: 0 for n in G.neighbors(node)}
+def q_learning_route(G, start, goal, episodes=300):
+    Q = {node: {n: 0 for n in G.neighbors(node)} for node in G.nodes()}
 
     alpha = 0.7
     gamma = 0.8
@@ -102,26 +104,30 @@ def q_learning_route(G, start, goal, episodes=200):
             reward = -G[current][next_node]['weight']
 
             if next_node == goal:
-                reward += 50  # reward for reaching goal
+                reward += 100  # strong reward
 
-            Q[current][next_node] = Q[current][next_node] + alpha * (
+            Q[current][next_node] += alpha * (
                 reward + gamma * max(Q[next_node].values(), default=0)
                 - Q[current][next_node]
             )
 
             current = next_node
 
-    # BUILD PATH
+    # BUILD FINAL PATH
     path = [start]
     current = start
 
+    visited = set()
+
     while current != goal:
+        visited.add(current)
+
         if current not in Q or not Q[current]:
             break
 
         next_node = max(Q[current], key=Q[current].get)
 
-        if next_node in path:
+        if next_node in visited:
             break
 
         path.append(next_node)
@@ -130,22 +136,7 @@ def q_learning_route(G, start, goal, episodes=200):
     return path
 
 # =========================
-# DIRECT DISTANCE CHECK
-# =========================
-def get_direct_distance(start, goal):
-    direct = df[(df['Pickup Location']==start) & (df['Drop Location']==goal)]
-    reverse = df[(df['Pickup Location']==goal) & (df['Drop Location']==start)]
-
-    if not direct.empty and pd.notna(direct.iloc[0]['Ride Distance']):
-        return direct.iloc[0]['Ride Distance']
-
-    if not reverse.empty and pd.notna(reverse.iloc[0]['Ride Distance']):
-        return reverse.iloc[0]['Ride Distance']
-
-    return None
-
-# =========================
-# SESSION STATE
+# SESSION
 # =========================
 if "map_html" not in st.session_state:
     st.session_state.map_html = None
@@ -161,25 +152,26 @@ goal  = col2.selectbox("🔴 Destination", cities)
 # =========================
 # BUTTON
 # =========================
-if st.button("🚀 Find Smart AI Route"):
+if st.button("🚀 Find Smart Route"):
 
     temp_G, events = apply_conditions(G)
 
-    direct = get_direct_distance(start, goal)
-
-    if direct is not None:
-        path = [start, goal]
-        dist = direct
-        reason = "📊 Direct dataset route"
-
-    else:
+    try:
+        # 🔥 ALWAYS USE Q-LEARNING (FOR INTERMEDIATE PATH)
         path = q_learning_route(temp_G, start, goal)
 
+        # fallback if bad path
+        if len(path) < 2:
+            path = nx.shortest_path(temp_G, start, goal, weight='weight')
+
+        # calculate distance
         dist = 0
         for i in range(len(path)-1):
             dist += temp_G[path[i]][path[i+1]]['weight']
 
-        reason = "🤖 Q-Learning optimized route (dynamic conditions)"
+    except:
+        st.error("❌ No route available due to dynamic conditions")
+        st.stop()
 
     # =========================
     # OUTPUT
@@ -192,19 +184,47 @@ if st.button("🚀 Find Smart AI Route"):
     st.write("### 📍 Route Path")
     st.write(" ➝ ".join(path))
 
-    st.info(reason)
-
     # =========================
-    # SIMPLE MAP (FAST)
+    # MAP WITH DYNAMIC COLORS
     # =========================
     random.seed(42)
     coords = {city: (random.uniform(20, 28), random.uniform(70, 88)) for city in cities}
 
     m = folium.Map(location=coords[start], zoom_start=6)
 
-    route_coords = [coords[c] for c in path]
+    # DRAW ROUTE WITH CONDITIONS
+    for i in range(len(path)-1):
+        u, v = path[i], path[i+1]
 
-    folium.PolyLine(route_coords, color="blue", weight=6).add_to(m)
+        event = events.get((u, v), events.get((v, u), "CLEAR"))
+
+        if event == "BLOCKED":
+            color = "red"
+        elif event == "TRAFFIC":
+            color = "orange"
+        elif event == "WEATHER":
+            color = "purple"
+        elif event == "ROADWORK":
+            color = "black"
+        else:
+            color = "green"
+
+        folium.PolyLine(
+            [coords[u], coords[v]],
+            color=color,
+            weight=6
+        ).add_to(m)
+
+    # MARKERS
+    for city in path:
+        folium.CircleMarker(
+            location=coords[city],
+            radius=5,
+            color="yellow",
+            fill=True,
+            fill_color="yellow",
+            popup=city
+        ).add_to(m)
 
     folium.Marker(coords[start], icon=folium.Icon(color="green")).add_to(m)
     folium.Marker(coords[goal], icon=folium.Icon(color="red")).add_to(m)
@@ -214,10 +234,22 @@ if st.button("🚀 Find Smart AI Route"):
 # =========================
 # MAP DISPLAY
 # =========================
-st.subheader("🗺️ Route Map")
+st.subheader("🗺️ Dynamic Route Map")
 
 if st.session_state.map_html:
     components.html(st.session_state.map_html, height=500)
 else:
     m = folium.Map(location=[22.5, 78.9], zoom_start=5)
     components.html(m._repr_html_(), height=500)
+
+# =========================
+# LEGEND
+# =========================
+st.markdown("""
+### ⚡ Dynamic Conditions Legend
+- 🔴 Red → Blocked Road  
+- 🟠 Orange → Heavy Traffic  
+- 🟣 Purple → Bad Weather  
+- ⚫ Black → Road Work  
+- 🟢 Green → Clear Route  
+""")
