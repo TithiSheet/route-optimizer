@@ -3,12 +3,11 @@ import pandas as pd
 import networkx as nx
 import folium
 import random
-import time
-from streamlit_folium import st_folium
+import streamlit.components.v1 as components
 
 st.set_page_config(layout="wide")
 
-st.title("🚗 Smart Route Optimizer (With Animation)")
+st.title("🌍 Smart Route Optimizer")
 
 # =========================
 # LOAD DATA
@@ -25,18 +24,18 @@ df = load_data()
 cities = sorted(set(df['Pickup Location']).union(set(df['Drop Location'])))
 
 # =========================
-# GRAPH
+# BUILD GRAPH
 # =========================
 @st.cache_resource
 def build_graph(df):
     G = nx.Graph()
+
     for _, row in df.iterrows():
-        if pd.notna(row['Ride Distance']):
-            G.add_edge(
-                row['Pickup Location'],
-                row['Drop Location'],
-                weight=row['Ride Distance']
-            )
+        u, v, d = row['Pickup Location'], row['Drop Location'], row['Ride Distance']
+
+        if pd.notna(d):
+            G.add_edge(u, v, weight=d)
+
     return G
 
 G = build_graph(df)
@@ -44,12 +43,14 @@ G = build_graph(df)
 # =========================
 # DIRECT DISTANCE
 # =========================
-def get_direct_distance(u, v):
-    row = df[(df['Pickup Location']==u) & (df['Drop Location']==v)]
+def get_direct_distance(start, goal):
+    row = df[(df['Pickup Location']==start) & (df['Drop Location']==goal)]
+
     if not row.empty and pd.notna(row.iloc[0]['Ride Distance']):
         return row.iloc[0]['Ride Distance']
 
-    row2 = df[(df['Pickup Location']==v) & (df['Drop Location']==u)]
+    row2 = df[(df['Pickup Location']==goal) & (df['Drop Location']==start)]
+
     if not row2.empty and pd.notna(row2.iloc[0]['Ride Distance']):
         return row2.iloc[0]['Ride Distance']
 
@@ -66,32 +67,33 @@ def apply_dynamic(G):
         r = random.random()
 
         if r < 0.1:
-            temp[u][v]['weight'] *= 2
-            events[(u, v)] = "Blocked"
+            temp[u][v]['weight'] *= 2.0
+            events[(u, v)] = "🚧 Blocked"
 
         elif r < 0.3:
             temp[u][v]['weight'] *= 1.5
-            events[(u, v)] = "Traffic"
+            events[(u, v)] = "🚦 Traffic"
 
         elif r < 0.5:
             temp[u][v]['weight'] *= 1.3
-            events[(u, v)] = "Weather"
+            events[(u, v)] = "🌧 Weather"
 
         elif r < 0.7:
             temp[u][v]['weight'] *= 1.2
-            events[(u, v)] = "Road Work"
+            events[(u, v)] = "🛠 Road Work"
 
         else:
-            events[(u, v)] = "Clear"
+            events[(u, v)] = "✅ Clear"
 
     return temp, events
 
 # =========================
-# FORCE PATH
+# FORCE INTERMEDIATE ROUTE
 # =========================
 def force_path(G, start, goal):
     try:
         mid = random.choice(list(G.nodes()))
+
         if mid == start or mid == goal:
             return nx.shortest_path(G, start, goal, weight='weight')
 
@@ -99,19 +101,24 @@ def force_path(G, start, goal):
         p2 = nx.shortest_path(G, mid, goal, weight='weight')
 
         return p1[:-1] + p2
+
     except:
         return nx.shortest_path(G, start, goal, weight='weight')
 
 # =========================
-# DISTANCE
+# DISTANCE CALCULATION FIX
 # =========================
-def calc_distance(G, path, base=None):
+def calculate_distance(G, path, base_distance=None):
     total = 0
-    for i in range(len(path)-1):
-        total += G[path[i]][path[i+1]]['weight']
 
-    if base:
-        total = max(total, base)
+    for i in range(len(path)-1):
+        u, v = path[i], path[i+1]
+        if G.has_edge(u, v):
+            total += G[u][v]['weight']
+
+    # 🔥 IMPORTANT FIX
+    if base_distance:
+        total = max(total, base_distance)
 
     return total
 
@@ -126,54 +133,101 @@ goal  = col2.selectbox("🔴 Destination", cities)
 # =========================
 # BUTTON
 # =========================
-if st.button("🚀 Start Route Animation"):
+if st.button("🚀 Find Dynamic Route"):
 
-    base = get_direct_distance(start, goal)
+    base_distance = get_direct_distance(start, goal)
 
     temp_G, events = apply_dynamic(G)
 
-    if base:
+    if base_distance:
         path = force_path(temp_G, start, goal)
-        dist = calc_distance(temp_G, path, base)
+        dist = calculate_distance(temp_G, path, base_distance)
+        st.info("⚡ Dynamic route applied (distance increased due to conditions)")
     else:
         path = nx.shortest_path(temp_G, start, goal, weight='weight')
-        dist = calc_distance(temp_G, path)
+        dist = calculate_distance(temp_G, path)
 
+    # =========================
+    # OUTPUT
+    # =========================
     st.success("✅ Route Found")
 
-    st.write(f"📏 Distance: {dist:.2f} km")
+    st.write(f"📏 Total Distance: {dist:.2f} km")
+    st.write(f"🛑 Stops: {len(path)-1}")
+
+    st.write("### 📍 Route Path")
     st.write(" ➝ ".join(path))
 
     # =========================
-    # FIXED COORDS
+    # STEP VIEW
+    # =========================
+    st.write("### 🧭 Step-by-Step Distance")
+
+    for i in range(len(path)-1):
+        u, v = path[i], path[i+1]
+
+        if temp_G.has_edge(u, v):
+            d = temp_G[u][v]['weight']
+            st.write(f"➡ {u} → {v} = {d:.2f} km")
+
+    # =========================
+    # MAP
     # =========================
     random.seed(42)
     coords = {city: (random.uniform(20, 28), random.uniform(70, 88)) for city in cities}
 
+    m = folium.Map(location=coords[start], zoom_start=6)
+
+    # 🔥 DRAW GRAPH WITH COLORS
+    for u, v in temp_G.edges():
+        event = events.get((u, v), "CLEAR")
+
+        color = "green"
+        if "Blocked" in event:
+            color = "red"
+        elif "Traffic" in event:
+            color = "orange"
+        elif "Weather" in event:
+            color = "purple"
+        elif "Road Work" in event:
+            color = "blue"
+
+        folium.PolyLine([coords[u], coords[v]], color=color, weight=2).add_to(m)
+
+    # ROUTE PATH
+    route_coords = [coords[c] for c in path]
+    folium.PolyLine(route_coords, color="black", weight=6).add_to(m)
+
+    # MARKERS
+    for city in path:
+        folium.Marker(coords[city], popup=city).add_to(m)
+
     # =========================
-    # ANIMATION LOOP
+    # LEGEND (YOU ASKED THIS)
     # =========================
-    map_placeholder = st.empty()
+    legend_html = """
+    <div style="
+        position: fixed;
+        bottom: 50px;
+        left: 50px;
+        width: 220px;
+        height: 180px;
+        background-color: white;
+        border:2px solid grey;
+        z-index:9999;
+        font-size:14px;
+        padding:10px;
+    ">
+    <b>🧭 Legend</b><br>
+    🔴 Blocked<br>
+    🟠 Traffic<br>
+    🟣 Weather<br>
+    🔵 Road Work<br>
+    🟢 Clear<br>
+    ⚫ Route Path
+    </div>
+    """
 
-    for i in range(len(path)):
+    m.get_root().html.add_child(folium.Element(legend_html))
 
-        m = folium.Map(location=coords[start], zoom_start=6)
-
-        # draw full route
-        route_coords = [coords[c] for c in path]
-        folium.PolyLine(route_coords, color="blue", weight=5).add_to(m)
-
-        # moving marker 🚗
-        folium.Marker(
-            coords[path[i]],
-            popup=f"🚗 At {path[i]}",
-            icon=folium.Icon(color="red", icon="car")
-        ).add_to(m)
-
-        # start/end
-        folium.Marker(coords[start], icon=folium.Icon(color="green")).add_to(m)
-        folium.Marker(coords[goal], icon=folium.Icon(color="black")).add_to(m)
-
-        map_placeholder.write(m)
-
-        time.sleep(1)  # speed control
+    components.html(m._repr_html_(), height=550)
