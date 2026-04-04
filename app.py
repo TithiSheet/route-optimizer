@@ -74,13 +74,13 @@ def apply_dynamic(G):
             temp[u][v]['weight'] *= 1.5
             events[(u, v)] = "🚦 Traffic"
 
-        elif r < 0.5:
-            temp[u][v]['weight'] *= 1.3
-            events[(u, v)] = "🌧 Weather"
+        #elif r < 0.5:
+            #temp[u][v]['weight'] *= 1.3
+            #events[(u, v)] = "🌧 Weather"
 
-        elif r < 0.7:
-            temp[u][v]['weight'] *= 1.2
-            events[(u, v)] = "🛠 Road Work"
+        #elif r < 0.7:
+         #   temp[u][v]['weight'] *= 1.2
+          #  events[(u, v)] = "🛠 Road Work"
 
         else:
             events[(u, v)] = "✅ Clear"
@@ -187,10 +187,10 @@ if st.button("🚀 Find Dynamic Route"):
             color = "red"
         elif "Traffic" in event:
             color = "orange"
-        elif "Weather" in event:
-            color = "purple"
-        elif "Road Work" in event:
-            color = "blue"
+        #elif "Weather" in event:
+         #   color = "purple"
+        #elif "Road Work" in event:
+         #   color = "blue"
 
         folium.PolyLine([coords[u], coords[v]], color=color, weight=2).add_to(m)
 
