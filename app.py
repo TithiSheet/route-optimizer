@@ -170,33 +170,54 @@ if st.button("🚀 Find Dynamic Route"):
     # =========================
     # MAP
     # =========================
-    random.seed(42)
-    coords = {city: (random.uniform(20, 28), random.uniform(70, 88)) for city in cities}
+  # =========================
+# ANIMATED MAP 🚗
+# =========================
+random.seed(42)
+coords = {city: (random.uniform(20, 28), random.uniform(70, 88)) for city in cities}
 
-    m = folium.Map(location=coords[start], zoom_start=6)
+m = folium.Map(location=coords[start], zoom_start=6)
 
-    # 🔥 DRAW GRAPH WITH COLORS
-    for u, v in temp_G.edges():
-        event = events.get((u, v), "CLEAR")
+# DRAW ROUTE
+route_coords = [coords[c] for c in path]
 
-        color = "green"
-        if "Blocked" in event:
-            color = "red"
-        elif "Traffic" in event:
-            color = "orange"
-        
-        elif "Road Work" in event:
-            color = "blue"
+folium.PolyLine(route_coords, color="black", weight=6).add_to(m)
 
-        folium.PolyLine([coords[u], coords[v]], color=color, weight=2).add_to(m)
+# MARKERS
+folium.Marker(coords[start], popup="Start", icon=folium.Icon(color="green")).add_to(m)
+folium.Marker(coords[goal], popup="End", icon=folium.Icon(color="red")).add_to(m)
 
-    # ROUTE PATH
-    route_coords = [coords[c] for c in path]
-    folium.PolyLine(route_coords, color="black", weight=6).add_to(m)
+# =========================
+# ANIMATION SCRIPT (JS)
+# =========================
+import json
 
-    # MARKERS
-    for city in path:
-        folium.Marker(coords[city], popup=city).add_to(m)
+coords_js = json.dumps(route_coords)
+
+animation_js = f"""
+<script>
+var coords = {coords_js};
+var map = document.getElementsByClassName('leaflet-container')[0]._leaflet_map;
+
+var marker = L.marker(coords[0]).addTo(map);
+
+var i = 0;
+
+function moveMarker() {{
+    if (i < coords.length - 1) {{
+        i++;
+        marker.setLatLng(coords[i]);
+        setTimeout(moveMarker, 800);
+    }}
+}}
+
+moveMarker();
+</script>
+"""
+
+m.get_root().html.add_child(folium.Element(animation_js))
+
+components.html(m._repr_html_(), height=550)
 
     # =========================
     # LEGEND (YOU ASKED THIS)
