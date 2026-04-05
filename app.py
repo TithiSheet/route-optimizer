@@ -8,8 +8,8 @@ import streamlit.components.v1 as components
 # =========================
 # PAGE CONFIG
 # =========================
-st.set_page_config(layout="wide", page_title="Smart Route Optimizer")
-st.title("🌍 Smart Route Optimizer")
+st.set_page_config(layout="wide", page_title="Dynamic Route Optimizer")
+st.title("🌍 Smart Dynamic Route Optimizer")
 
 # =========================
 # 1. LOAD DATA
@@ -19,7 +19,6 @@ def load_data():
     df = pd.read_csv("bookings.csv", encoding="latin1", on_bad_lines='skip')
     df.columns = df.columns.str.strip()
     df['Ride Distance'] = pd.to_numeric(df['Ride Distance'], errors='coerce')
-    # Filter valid rows
     return df.dropna(subset=['Ride Distance'])
 
 df = load_data()
@@ -41,7 +40,6 @@ def build_graph(_df):
 
 G_base = build_graph(df)
 
-# Fixed Map Coordinates
 @st.cache_data
 def get_coords(city_list):
     random.seed(42)
@@ -50,103 +48,120 @@ def get_coords(city_list):
 coords = get_coords(cities)
 
 # =========================
-# 3. UI SELECTION
+# 3. UI SIDEBAR (DYNAMIC CONTROLS)
+# =========================
+st.sidebar.header("🛠 Route Conditions")
+condition = st.sidebar.selectbox(
+    "Current Environment",
+    ["Normal/Clear", "Heavy Traffic", "Rainy/Weather", "Road Blockage"]
+)
+
+# Define multipliers based on conditions
+condition_map = {
+    "Normal/Clear": {"mult": 1.0, "color": "black"},
+    "Heavy Traffic": {"mult": 1.3, "color": "orange"},
+    "Rainy/Weather": {"mult": 1.15, "color": "blue"},
+    "Road Blockage": {"mult": 1.8, "color": "red"}
+}
+
+selected_mult = condition_map[condition]["mult"]
+route_color = condition_map[condition]["color"]
+
+# =========================
+# 4. MAIN SELECTION
 # =========================
 col1, col2 = st.columns(2)
 with col1:
-    start_node = st.selectbox("🟢 Source Node", cities, index=cities.index("IGI Airport") if "IGI Airport" in cities else 0)
+    start_node = st.selectbox("🟢 Source Node", cities, index=0)
 with col2:
-    end_node = st.selectbox("🔴 Destination Node", cities, index=cities.index("Madipur") if "Madipur" in cities else 1)
+    end_node = st.selectbox("🔴 Destination Node", cities, index=1)
 
-if st.button("Calculate Route"):
+if st.button("🚀 Calculate Dynamic Route"):
     
-    # A. Get the "Ride Distance" from dataset for this specific trip
-    direct_row = df[((df['Pickup Location'] == start_node) & (df['Drop Location'] == end_node)) | 
-                    ((df['Pickup Location'] == end_node) & (df['Drop Location'] == start_node))]
+    # A. Get Dataset Ride Distance
+    direct_match = df[((df['Pickup Location'] == start_node) & (df['Drop Location'] == end_node)) | 
+                      ((df['Pickup Location'] == end_node) & (df['Drop Location'] == start_node))]
     
-    if direct_row.empty:
-        st.warning("No direct ride distance found for this pair in dataset. Using path sum.")
-        target_total = None
+    if direct_match.empty:
+        st.warning("No direct distance in dataset. Using calculated shortest path.")
+        base_total = None
     else:
-        target_total = direct_row.iloc[0]['Ride Distance']
+        # Ground Truth from CSV
+        base_total = direct_match.iloc[0]['Ride Distance']
 
     try:
-        # B. Find the path
+        # B. Shortest Path
         path = nx.shortest_path(G_base, source=start_node, target=end_node, weight='weight')
         
-        # C. Calculate the Raw Sum of segments in the path
-        raw_segment_data = []
-        raw_path_sum = 0.0
+        # C. Calculate Segment Ratios
+        raw_segments = []
+        raw_sum = 0.0
         for i in range(len(path)-1):
             u, v = path[i], path[i+1]
-            dist = G_base[u][v]['weight']
-            raw_path_sum += dist
-            raw_segment_data.append({'from': u, 'to': v, 'base_dist': dist})
-        
-        # D. Calculate Scaled Distances to match Dataset's "Ride Distance"
-        # Logic: (Segment / Total Path Sum) * Dataset Ride Distance
-        final_details = []
-        final_total_display = 0.0
-        
-        if target_total and raw_path_sum > 0:
-            scale_factor = target_total / raw_path_sum
-        else:
-            scale_factor = 1.0
-            target_total = raw_path_sum
+            d = G_base[u][v]['weight']
+            raw_sum += d
+            raw_segments.append({'u': u, 'v': v, 'base': d})
 
-        for seg in raw_segment_data:
-            scaled_dist = seg['base_dist'] * scale_factor
-            final_total_display += scaled_dist
-            final_details.append({
-                "from": seg['from'], 
-                "to": seg['to'], 
-                "dist": scaled_dist
-            })
+        # D. Apply Dynamic Multiplier to the Dataset Total
+        if base_total is None: base_total = raw_sum
+        
+        dynamic_total = base_total * selected_mult
+        
+        # E. Fragment the Dynamic Total into segments
+        final_steps = []
+        actual_sum_check = 0.0
+        
+        for seg in raw_segments:
+            # Proportionally distribute the dynamic total
+            segment_share = (seg['base'] / raw_sum) * dynamic_total
+            actual_sum_check += segment_share
+            final_steps.append({'u': seg['u'], 'v': seg['v'], 'dist': segment_share})
 
         # =========================
-        # 4. OUTPUT DISPLAY
+        # 5. DISPLAY
         # =========================
-        st.success(f"✅ Journey: {start_node} to {end_node}")
+        st.info(f"Condition Applied: **{condition}** (Distance factor: {selected_mult}x)")
         
-        res_col1, res_col2 = st.columns([1, 2])
+        res1, res2 = st.columns([1, 2])
         
-        with res_col1:
-            st.metric("Total Route Distance (Matches Dataset)", f"{final_total_display:.2f} km")
-            st.write("### 🧭 Step-by-Step Segments")
-            for d in final_details:
-                st.write(f"➡ **{d['from']}** → **{d['to']}** = `{d['dist']:.2f} km`")
+        with res1:
+            st.metric("Total Route Distance", f"{actual_sum_check:.2f} km")
+            st.write("### 🧭 Step-by-Step Breakdown")
+            for step in final_steps:
+                st.write(f"➡ **{step['u']}** → **{step['v']}** = `{step['dist']:.2f} km`")
                 st.divider()
 
-        with res_col2:
+        with res2:
             m = folium.Map(location=coords[start_node], zoom_start=11)
             
-            # Draw Path Line
-            route_pts = [coords[city] for city in path]
-            folium.PolyLine(route_pts, color="black", weight=5).add_to(m)
+            # Draw Path with Dynamic Color
+            pts = [coords[city] for city in path]
+            folium.PolyLine(pts, color=route_color, weight=6, opacity=0.8).add_to(m)
 
-            # Markers: Source (Green), Middle (Blue), Destination (Red)
+            # Markers
             for i, city in enumerate(path):
                 if i == 0:
-                    folium.Marker(coords[city], popup=f"SOURCE: {city}", icon=folium.Icon(color='green')).add_to(m)
+                    folium.Marker(coords[city], popup=f"START: {city}", icon=folium.Icon(color='green')).add_to(m)
                 elif i == len(path)-1:
-                    folium.Marker(coords[city], popup=f"DESTINATION: {city}", icon=folium.Icon(color='red')).add_to(m)
+                    folium.Marker(coords[city], popup=f"END: {city}", icon=folium.Icon(color='red')).add_to(m)
                 else:
-                    folium.Marker(coords[city], popup=f"MIDDLE NODE: {city}", icon=folium.Icon(color='blue')).add_to(m)
+                    folium.Marker(coords[city], popup=f"STOP: {city}", icon=folium.Icon(color='blue')).add_to(m)
 
-            # LEGEND
-            legend_html = """
-                 <div style="position: fixed; bottom: 50px; left: 50px; width: 210px; height: 140px; 
-                             background-color: white; border:2px solid grey; z-index:9999; font-size:14px;
+            # Legend
+            legend_html = f"""
+                 <div style="position: fixed; bottom: 50px; left: 50px; width: 220px; height: 160px; 
+                             background-color: white; border:2px solid grey; z-index:9999; font-size:13px;
                              padding: 10px; border-radius: 8px;">
-                 <b>📍 Legend</b><br>
-                 <span style="color: green;">●</span> Source Node (Start)<br>
-                 <span style="color: blue;">●</span> Middle Node (Intermediate)<br>
-                 <span style="color: red;">●</span> Destination Node (End)<br>
-                 <span style="color: black;"><b>—</b></span> Calculated Route Path
+                 <b>📍 Dynamic Legend</b><br>
+                 <span style="color: green;">●</span> Source Node<br>
+                 <span style="color: blue;">●</span> Middle Node<br>
+                 <span style="color: red;">●</span> Destination Node<br>
+                 <span style="color: {route_color};"><b>—</b></span> <b>{condition} Path</b>
+                 <br><small>Total = Base CSV Dist × {selected_mult}</small>
                  </div>
                  """
             m.get_root().html.add_child(folium.Element(legend_html))
             components.html(m._repr_html_(), height=600)
 
     except nx.NetworkXNoPath:
-        st.error("No connectivity found between these nodes in the dataset.")
+        st.error("No path found.")
