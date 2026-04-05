@@ -211,18 +211,10 @@ if st.button("🚀 Find Dynamic Route"):
         folium.CircleMarker(location=coords[city],radius=5,color="blue",fill=True,fill_color="blue",popup=city).add_to(m)
 
 # 🟢 Source (START)
-       folium.Marker(
-           coords[start],
-           popup=f"Start: {start}",
-           icon=folium.Icon(color="green")
-           ).add_to(m)
+       folium.Marker(coords[start],popup=f"Start: {start}",icon=folium.Icon(color="green")).add_to(m)
 
 # 🔴 Destination (END)
-        folium.Marker(
-            coords[goal],
-            popup=f"End: {goal}",
-            icon=folium.Icon(color="red")
-            ).add_to(m)
+        folium.Marker(coords[goal],popup=f"End: {goal}",icon=folium.Icon(color="red")).add_to(m)
 
 
 
