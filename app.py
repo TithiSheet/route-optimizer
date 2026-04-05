@@ -16,11 +16,11 @@ st.title("🌍 Smart Route Optimizer")
 # =========================
 @st.cache_data
 def load_data():
-    # Loading your updated bookings.csv
+    # Ensure your file is named bookings.csv or update this string
     df = pd.read_csv("bookings.csv", encoding="latin1", on_bad_lines='skip')
     df.columns = df.columns.str.strip()
     df['Ride Distance'] = pd.to_numeric(df['Ride Distance'], errors='coerce')
-    # Remove rows where distance is missing to avoid graph errors
+    # Use only rows with valid distances
     df = df.dropna(subset=['Ride Distance'])
     return df
 
@@ -28,126 +28,131 @@ df = load_data()
 cities = sorted(set(df['Pickup Location']).union(set(df['Drop Location'])))
 
 # =========================
-# 2. BUILD GRAPH (STRICT WEIGHTS)
+# 2. BUILD GRAPH
 # =========================
 @st.cache_resource
 def build_graph(_df):
     G = nx.Graph()
-    # We group by locations and take the MINIMUM distance to ensure the graph is accurate
-    clean_edges = _df.groupby(['Pickup Location', 'Drop Location'])['Ride Distance'].min().reset_index()
-    
-    for _, row in clean_edges.iterrows():
+    for _, row in _df.iterrows():
         u, v, d = row['Pickup Location'], row['Drop Location'], row['Ride Distance']
-        G.add_edge(u, v, weight=d)
+        if G.has_edge(u, v):
+            G[u][v]['weight'] = min(G[u][v]['weight'], d)
+        else:
+            G.add_edge(u, v, weight=d)
     return G
 
 G_base = build_graph(df)
 
-# Fixed Coordinates for visualization consistency
+# Fixed Coordinates (Caching prevents nodes from jumping)
 @st.cache_data
-def get_coords(city_list):
-    random.seed(42) 
-    # Generating coordinates within a tighter Delhi-NCR bounding box
+def get_fixed_coords(city_list):
+    random.seed(42)
     return {city: (random.uniform(28.4, 28.8), random.uniform(77.0, 77.4)) for city in city_list}
 
-coords = get_coords(cities)
+coords = get_fixed_coords(cities)
 
 # =========================
-# 3. DYNAMIC TRAFFIC LOGIC
+# 3. DYNAMIC ENVIRONMENT
 # =========================
-def apply_dynamic(G):
-    temp_G = G.copy()
+def apply_dynamic_conditions(G):
+    dynamic_G = G.copy()
     events = {}
-    for u, v in temp_G.edges():
+    for u, v in dynamic_G.edges():
         r = random.random()
-        if r < 0.10:
-            temp_G[u][v]['weight'] *= 2.5  # Blocked weight increase
-            events[(u, v)] = "🚧 Blocked"
-        elif r < 0.25:
-            temp_G[u][v]['weight'] *= 1.6  # Traffic weight increase
-            events[(u, v)] = "🚦 Traffic"
+        if r < 0.15:
+            dynamic_G[u][v]['weight'] *= 2.5
+            events[(u, v)] = "🔴 Blocked"
+        elif r < 0.30:
+            dynamic_G[u][v]['weight'] *= 1.6
+            events[(u, v)] = "🟠 Traffic"
         else:
-            events[(u, v)] = "✅ Clear"
-    return temp_G, events
+            events[(u, v)] = "🟢 Clear"
+    return dynamic_G, events
 
 # =========================
 # 4. USER INTERFACE
 # =========================
 col1, col2 = st.columns(2)
 with col1:
-    start_node = st.selectbox("🟢 Source", cities, index=0)
+    start_node = st.selectbox("🟢 Select Source", cities, index=cities.index("IGI Airport") if "IGI Airport" in cities else 0)
 with col2:
-    end_node = st.selectbox("🔴 Destination", cities, index=min(1, len(cities)-1))
+    end_node = st.selectbox("🔴 Select Destination", cities, index=cities.index("Madipur") if "Madipur" in cities else 1)
 
 if st.button("🚀 Find Smart Route"):
-    # Apply conditions to the graph
-    temp_G, events = apply_dynamic(G_base)
+    # Apply dynamic weights
+    temp_G, status_map = apply_dynamic_conditions(G_base)
     
     try:
-        # Calculate Shortest Path using current (dynamic) weights
+        # Calculate Path
         path = nx.shortest_path(temp_G, source=start_node, target=end_node, weight='weight')
         
-        # --- CALCULATION FIX ---
-        # We calculate the total distance by summing the steps directly
-        total_dist = 0.0
-        path_details = []
+        # CALCULATE CORRECT TOTAL DISTANCE (Sum of steps)
+        total_sum = 0.0
+        step_details = []
         
         for i in range(len(path)-1):
             u, v = path[i], path[i+1]
-            # Retrieve the weight used by the algorithm
-            step_dist = temp_G[u][v]['weight']
-            total_dist += step_dist
-            path_details.append({
-                "from": u,
-                "to": v,
-                "dist": step_dist,
-                "status": events.get((u, v), "Clear")
+            # Get the weight actually used in the graph
+            weight = temp_G[u][v]['weight']
+            total_sum += weight
+            step_details.append({
+                "from": u, "to": v, 
+                "dist": weight, 
+                "status": status_map.get((u, v), status_map.get((v, u), "Clear"))
             })
 
         # =========================
-        # OUTPUT DISPLAY
+        # 5. DISPLAY RESULTS
         # =========================
-        st.success(f"✅ Route Optimized: {start_node} to {end_node}")
+        st.success(f"✅ Route Optimized Successfully")
         
         res_col1, res_col2 = st.columns([1, 2])
         
         with res_col1:
-            st.metric("Total Route Distance", f"{total_dist:.2f} km")
+            st.metric("Total Calculated Distance", f"{total_sum:.2f} km")
+            st.write(f"**Stops:** {len(path)-2} intermediate nodes")
             
-            st.write("### 🧭 Step-by-Step Breakdown")
-            for step in path_details:
-                st.write(f"➡ **{step['from']}** → **{step['to']}**")
-                st.info(f"Distance: **{step['dist']:.2f} km** | Status: {step['status']}")
-            
-            # Final Validation Check for user peace of mind
-            st.caption(f"Verification: Sum of steps ({sum(s['dist'] for s in path_details):.2f}) == Total ({total_dist:.2f})")
+            st.write("### 🧭 Step-by-Step Distance")
+            for step in step_details:
+                st.write(f"➡ **{step['from']}** → **{step['to']}** = `{step['dist']:.2f} km`")
+                st.caption(f"Status: {step['status']}")
+                st.divider()
 
         with res_col2:
-            # Generate Map
+            # Create Map
             m = folium.Map(location=coords[start_node], zoom_start=11, tiles="cartodbpositron")
 
-            # Draw the Path
+            # Draw Route Path
             route_coords = [coords[city] for city in path]
-            folium.PolyLine(route_coords, color="black", weight=6, opacity=0.8).add_to(m)
+            folium.PolyLine(route_coords, color="black", weight=5, opacity=0.7).add_to(m)
 
-            # Markers
-            folium.Marker(coords[start_node], popup="START", icon=folium.Icon(color='green')).add_to(m)
-            folium.Marker(coords[end_node], popup="END", icon=folium.Icon(color='red')).add_to(m)
+            # Markers for Source, Destination, and Middle Nodes
+            for i, city in enumerate(path):
+                if i == 0:
+                    folium.Marker(coords[city], popup=f"Source: {city}", icon=folium.Icon(color='green', icon='play')).add_to(m)
+                elif i == len(path) - 1:
+                    folium.Marker(coords[city], popup=f"Destination: {city}", icon=folium.Icon(color='red', icon='stop')).add_to(m)
+                else:
+                    folium.Marker(coords[city], popup=f"Middle Node: {city}", icon=folium.Icon(color='blue', icon='info-sign')).add_to(m)
 
-            # Map Legend
+            # LEGEND HTML
             legend_html = """
-                 <div style="position: fixed; bottom: 50px; left: 50px; width: 150px; height: 100px; 
-                             background-color: white; border:2px solid grey; z-index:9999; font-size:12px;
-                             padding: 10px; border-radius: 5px;">
-                 <b>Route Legend</b><br>
-                 <span style="color: black;">▬</span> Optimized Path<br>
-                 <span style="color: green;">●</span> Source<br>
-                 <span style="color: red;">●</span> Destination
+                 <div style="position: fixed; bottom: 50px; left: 50px; width: 200px; height: 160px; 
+                             background-color: white; border:2px solid grey; z-index:9999; font-size:14px;
+                             padding: 10px; border-radius: 10px; box-shadow: 2px 2px 5px rgba(0,0,0,0.2);">
+                 <b>📍 Legend</b><br>
+                 <span style="color: green;">●</span> Source Node<br>
+                 <span style="color: blue;">●</span> Middle Node<br>
+                 <span style="color: red;">●</span> Destination Node<br>
+                 <span style="color: black;"><b>—</b></span> Route Path<br>
+                 <hr style="margin:5px 0;">
+                 <small>Weights updated based on dynamic traffic conditions.</small>
                  </div>
                  """
             m.get_root().html.add_child(folium.Element(legend_html))
             
+            # Show Map
             components.html(m._repr_html_(), height=600)
 
     except nx.NetworkXNoPath:
-        st.error("No path found between these locations. Try a different source or destination.")
+        st.error("No path could be found between these locations under current traffic conditions.")
