@@ -241,7 +241,7 @@ folium.Marker(
     # LEGEND (YOU ASKED THIS)
     # =========================
     legend_html = """
-    <div style="
+        <div style="
         position: fixed;
         bottom: 50px;
         left: 50px;
