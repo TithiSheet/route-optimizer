@@ -207,7 +207,7 @@ if st.button("🚀 Find Dynamic Route"):
 # =========================
 
 # 🔵 All intermediate nodes
-for city in path:
+ for city in path:
     folium.CircleMarker(
         location=coords[city],
         radius=5,
