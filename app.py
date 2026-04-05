@@ -76,7 +76,7 @@ with col1:
 with col2:
     end_node = st.selectbox("🔴 Destination Node", cities, index=1)
 
-if st.button("Route Calculation"):
+if st.button("🚀 Calculate Dynamic Route"):
     
     # A. Get Dataset Ride Distance
     direct_match = df[((df['Pickup Location'] == start_node) & (df['Drop Location'] == end_node)) | 
@@ -120,7 +120,7 @@ if st.button("Route Calculation"):
         # =========================
         # 5. DISPLAY
         # =========================
-        st.info(f"Condition Applied: **{condition}**")
+        st.info(f"Condition Applied: **{condition}** (Distance factor: {selected_mult}x)")
         
         res1, res2 = st.columns([1, 2])
         
@@ -132,6 +132,7 @@ if st.button("Route Calculation"):
                 st.divider()
 
         with res2:
+            # INCREASED SIZE: Map is now 800px high for better visibility
             m = folium.Map(location=coords[start_node], zoom_start=11)
             
             # Draw Path with Dynamic Color
@@ -157,11 +158,13 @@ if st.button("Route Calculation"):
                  <span style="color: blue;">●</span> Middle Node<br>
                  <span style="color: red;">●</span> Destination Node<br>
                  <span style="color: {route_color};"><b>—</b></span> <b>{condition} Path</b>
-                 
+                 <br><small>Total = Base CSV Dist × {selected_mult}</small>
                  </div>
                  """
             m.get_root().html.add_child(folium.Element(legend_html))
-            components.html(m._repr_html_(), height=600)
+            
+            # Height increased to 800 for the larger view you requested
+            components.html(m._repr_html_(), height=800)
 
     except nx.NetworkXNoPath:
         st.error("No path found.")
