@@ -157,7 +157,7 @@ if st.button("Route Calculation"):
                  <span style="color: blue;">●</span> Middle Node<br>
                  <span style="color: red;">●</span> Destination Node<br>
                  <span style="color: {route_color};"><b>—</b></span> <b>{condition} Path</b>
-                 <br><small>Total = Base CSV Dist × {selected_mult}</small>
+                 
                  </div>
                  """
             m.get_root().html.add_child(folium.Element(legend_html))
