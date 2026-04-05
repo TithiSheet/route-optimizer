@@ -58,7 +58,7 @@ with col1:
 with col2:
     end_node = st.selectbox("🔴 Destination Node", cities, index=cities.index("Madipur") if "Madipur" in cities else 1)
 
-if st.button("🚀 Calculate Route & Sync Distances"):
+if st.button("Calculate Route"):
     
     # A. Get the "Ride Distance" from dataset for this specific trip
     direct_row = df[((df['Pickup Location'] == start_node) & (df['Drop Location'] == end_node)) | 
