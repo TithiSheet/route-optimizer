@@ -76,7 +76,7 @@ with col1:
 with col2:
     end_node = st.selectbox("🔴 Destination Node", cities, index=1)
 
-if st.button("🚀 Calculate Dynamic Route"):
+if st.button("Route Calculation"):
     
     # A. Get Dataset Ride Distance
     direct_match = df[((df['Pickup Location'] == start_node) & (df['Drop Location'] == end_node)) | 
@@ -120,7 +120,7 @@ if st.button("🚀 Calculate Dynamic Route"):
         # =========================
         # 5. DISPLAY
         # =========================
-        st.info(f"Condition Applied: **{condition}** (Distance factor: {selected_mult}x)")
+        st.info(f"Condition Applied: **{condition}**")
         
         res1, res2 = st.columns([1, 2])
         
