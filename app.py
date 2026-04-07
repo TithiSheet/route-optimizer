@@ -1,15 +1,20 @@
+# Online Python compiler (interpreter) to run Python online.
+# Write Python 3 code in this online editor and run it.
+print("Try programiz.pro")
+
+
+
 import streamlit as st
 import pandas as pd
 import networkx as nx
 import folium
 import random
-import numpy as np
 import streamlit.components.v1 as components
 
 # =========================
 # PAGE CONFIG
 # =========================
-st.set_page_config(layout="wide", page_title="Q-Learning Route Optimizer")
+st.set_page_config(layout="wide", page_title="Dynamic Route Optimizer")
 st.title("🌍 Smart Dynamic Route Optimizer")
 
 # =========================
@@ -57,16 +62,15 @@ condition = st.sidebar.selectbox(
     ["Normal/Clear", "Heavy Traffic", "Rainy/Weather", "Road Blockage"]
 )
 
-# Q-Learning inspired Penalty Multipliers
-# These change the 'cost' of edges, forcing the algorithm to find a new path
+# Define multipliers based on conditions
 condition_map = {
-    "Normal/Clear": {"penalty": 1.0, "color": "black", "desc": "Optimal Path"},
-    "Heavy Traffic": {"penalty": 3.5, "color": "orange", "desc": "Avoiding Congestion"},
-    "Rainy/Weather": {"penalty": 2.0, "color": "blue", "desc": "Slower Traction"},
-    "Road Blockage": {"penalty": 10.0, "color": "red", "desc": "Detour Required"}
+    "Normal/Clear": {"mult": 1.0, "color": "black"},
+    "Heavy Traffic": {"mult": 1.3, "color": "orange"},
+    "Rainy/Weather": {"mult": 1.15, "color": "blue"},
+    "Road Blockage": {"mult": 1.8, "color": "red"}
 }
 
-selected_penalty = condition_map[condition]["penalty"]
+selected_mult = condition_map[condition]["mult"]
 route_color = condition_map[condition]["color"]
 
 # =========================
@@ -78,53 +82,66 @@ with col1:
 with col2:
     end_node = st.selectbox("🔴 Destination Node", cities, index=1)
 
-if st.button("🚀 Calculate Dynamic Route"):
+if st.button("Route Calculation "):
     
-    # A. Apply Environment Penalties to Graph Edges
-    # This simulates the 'State' update in Q-Learning
-    temp_G = G_base.copy()
-    random.seed(hash(condition)) # Consistent "random" blocks per condition
+    # A. Get Dataset Ride Distance
+    direct_match = df[((df['Pickup Location'] == start_node) & (df['Drop Location'] == end_node)) | 
+                      ((df['Pickup Location'] == end_node) & (df['Drop Location'] == start_node))]
     
-    for u, v in temp_G.edges():
-        # Randomly assign the condition impact to specific edges
-        if random.random() < 0.4: # 40% of roads are affected by the condition
-            temp_G[u][v]['weight'] *= selected_penalty
+    if direct_match.empty:
+        st.warning("No direct distance in dataset. Using calculated shortest path.")
+        base_total = None
+    else:
+        # Ground Truth from CSV
+        base_total = direct_match.iloc[0]['Ride Distance']
 
     try:
-        # B. Calculate Path on the RE-WEIGHTED graph
-        # This will now yield a different 'path' list if a detour is cheaper
-        path = nx.shortest_path(temp_G, source=start_node, target=end_node, weight='weight')
+        # B. Shortest Path
+        path = nx.shortest_path(G_base, source=start_node, target=end_node, weight='weight')
         
-        # C. Calculate Segment Breakdown
-        final_steps = []
-        total_dist_sum = 0.0
-        
+        # C. Calculate Segment Ratios
+        raw_segments = []
+        raw_sum = 0.0
         for i in range(len(path)-1):
             u, v = path[i], path[i+1]
-            # We display the actual distance from the base dataset, 
-            # multiplied by the penalty to show impact.
-            seg_dist = temp_G[u][v]['weight']
-            total_dist_sum += seg_dist
-            final_steps.append({'u': u, 'v': v, 'dist': seg_dist})
+            d = G_base[u][v]['weight']
+            raw_sum += d
+            raw_segments.append({'u': u, 'v': v, 'base': d})
+
+        # D. Apply Dynamic Multiplier to the Dataset Total
+        if base_total is None: base_total = raw_sum
+        
+        dynamic_total = base_total * selected_mult
+        
+        # E. Fragment the Dynamic Total into segments
+        final_steps = []
+        actual_sum_check = 0.0
+        
+        for seg in raw_segments:
+            # Proportionally distribute the dynamic total
+            segment_share = (seg['base'] / raw_sum) * dynamic_total
+            actual_sum_check += segment_share
+            final_steps.append({'u': seg['u'], 'v': seg['v'], 'dist': segment_share})
 
         # =========================
         # 5. DISPLAY
         # =========================
-        st.info(f"Condition: **{condition}** | Strategy: **{condition_map[condition]['desc']}**")
+        st.info(f"Condition Applied: **{condition}**")
         
         res1, res2 = st.columns([1, 2])
         
         with res1:
-            st.metric("Total Route Distance", f"{total_dist_sum:.2f} km")
+            st.metric("Total Route Distance", f"{actual_sum_check:.2f} km")
             st.write("### 🧭 Step-by-Step Breakdown")
             for step in final_steps:
                 st.write(f"➡ **{step['u']}** → **{step['v']}** = `{step['dist']:.2f} km`")
                 st.divider()
 
         with res2:
+            # INCREASED SIZE: Map is now 800px high for better visibility
             m = folium.Map(location=coords[start_node], zoom_start=11)
             
-            # Draw Dynamic Path
+            # Draw Path with Dynamic Color
             pts = [coords[city] for city in path]
             folium.PolyLine(pts, color=route_color, weight=6, opacity=0.8).add_to(m)
 
@@ -142,16 +159,18 @@ if st.button("🚀 Calculate Dynamic Route"):
                  <div style="position: fixed; bottom: 50px; left: 50px; width: 220px; height: 160px; 
                              background-color: white; border:2px solid grey; z-index:9999; font-size:13px;
                              padding: 10px; border-radius: 8px;">
-                 <b>📍 Q-Learning Legend</b><br>
+                 <b>📍 Dynamic Legend</b><br>
                  <span style="color: green;">●</span> Source Node<br>
                  <span style="color: blue;">●</span> Middle Node<br>
                  <span style="color: red;">●</span> Destination Node<br>
                  <span style="color: {route_color};"><b>—</b></span> <b>{condition} Path</b>
-                 <br><small>Path intelligently rerouted based on road cost.</small>
+                 
                  </div>
                  """
             m.get_root().html.add_child(folium.Element(legend_html))
+            
+            # Height increased to 800 for the larger view you requested
             components.html(m._repr_html_(), height=800)
 
     except nx.NetworkXNoPath:
-        st.error("No path found. Roads are too heavily blocked.")
+        st.error("No path found.")
