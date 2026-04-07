@@ -10,7 +10,7 @@ import streamlit.components.v1 as components
 # PAGE CONFIG
 # =========================
 st.set_page_config(layout="wide", page_title="Q-Learning Route Optimizer")
-st.title("🌍 Smart Dynamic Route Optimizer (Q-Learning)")
+st.title("🌍 Smart Dynamic Route Optimizer")
 
 # =========================
 # 1. LOAD DATA
@@ -26,7 +26,7 @@ df = load_data()
 cities = sorted(set(df['Pickup Location']).union(set(df['Drop Location'])))
 
 # =========================
-# 2. BUILD BASE GRAPH
+# 2. BUILD GRAPH
 # =========================
 @st.cache_resource
 def build_graph(_df):
@@ -49,7 +49,7 @@ def get_coords(city_list):
 coords = get_coords(cities)
 
 # =========================
-# 3. DYNAMIC Q-LEARNING ENVIRONMENT
+# 3. UI SIDEBAR (DYNAMIC CONTROLS)
 # =========================
 st.sidebar.header("🛠 Route Conditions")
 condition = st.sidebar.selectbox(
@@ -57,33 +57,17 @@ condition = st.sidebar.selectbox(
     ["Normal/Clear", "Heavy Traffic", "Rainy/Weather", "Road Blockage"]
 )
 
-# Multipliers act as the 'Penalty' in the Q-learning state
+# Q-Learning inspired Penalty Multipliers
+# These change the 'cost' of edges, forcing the algorithm to find a new path
 condition_map = {
-    "Normal/Clear": {"mult": 1.0, "color": "black", "penalty": 0},
-    "Heavy Traffic": {"mult": 1.8, "color": "orange", "penalty": 5},
-    "Rainy/Weather": {"mult": 1.4, "color": "blue", "penalty": 2},
-    "Road Blockage": {"mult": 5.0, "color": "red", "penalty": 20}
+    "Normal/Clear": {"penalty": 1.0, "color": "black", "desc": "Optimal Path"},
+    "Heavy Traffic": {"penalty": 3.5, "color": "orange", "desc": "Avoiding Congestion"},
+    "Rainy/Weather": {"penalty": 2.0, "color": "blue", "desc": "Slower Traction"},
+    "Road Blockage": {"penalty": 10.0, "color": "red", "desc": "Detour Required"}
 }
 
-selected_mult = condition_map[condition]["mult"]
+selected_penalty = condition_map[condition]["penalty"]
 route_color = condition_map[condition]["color"]
-
-def get_dynamic_path(G, start, end, multiplier):
-    # This simulates a Q-Learning agent's decision-making
-    # We update the 'state' of the edges based on the environment
-    temp_G = G.copy()
-    
-    # We apply the penalty to a subset of edges randomly to simulate localized issues
-    # except for 'Clear' where everything is normal
-    random.seed(42) # Keep it consistent for the same session
-    for u, v, data in temp_G.edges(data=True):
-        # Only apply heavy multipliers to 30% of random roads to force a path change
-        if random.random() < 0.3:
-            temp_G[u][v]['weight'] = data['weight'] * multiplier
-        else:
-            temp_G[u][v]['weight'] = data['weight'] * (1.0 + (multiplier - 1.0) * 0.2)
-            
-    return nx.shortest_path(temp_G, source=start, target=end, weight='weight'), temp_G
 
 # =========================
 # 4. MAIN SELECTION
@@ -94,31 +78,45 @@ with col1:
 with col2:
     end_node = st.selectbox("🔴 Destination Node", cities, index=1)
 
-if st.button("🚀 Calculate Optimized Path"):
+if st.button("🚀 Calculate Dynamic Route"):
+    
+    # A. Apply Environment Penalties to Graph Edges
+    # This simulates the 'State' update in Q-Learning
+    temp_G = G_base.copy()
+    random.seed(hash(condition)) # Consistent "random" blocks per condition
+    
+    for u, v in temp_G.edges():
+        # Randomly assign the condition impact to specific edges
+        if random.random() < 0.4: # 40% of roads are affected by the condition
+            temp_G[u][v]['weight'] *= selected_penalty
+
     try:
-        # Get dynamic path based on Q-Learning penalized weights
-        path, dynamic_G = get_dynamic_path(G_base, start_node, end_node, selected_mult)
+        # B. Calculate Path on the RE-WEIGHTED graph
+        # This will now yield a different 'path' list if a detour is cheaper
+        path = nx.shortest_path(temp_G, source=start_node, target=end_node, weight='weight')
         
-        # Calculate strict step-by-step distances
+        # C. Calculate Segment Breakdown
         final_steps = []
-        total_sum = 0.0
+        total_dist_sum = 0.0
         
         for i in range(len(path)-1):
             u, v = path[i], path[i+1]
-            step_dist = dynamic_G[u][v]['weight']
-            total_sum += step_dist
-            final_steps.append({'u': u, 'v': v, 'dist': step_dist})
+            # We display the actual distance from the base dataset, 
+            # multiplied by the penalty to show impact.
+            seg_dist = temp_G[u][v]['weight']
+            total_dist_sum += seg_dist
+            final_steps.append({'u': u, 'v': v, 'dist': seg_dist})
 
         # =========================
         # 5. DISPLAY
         # =========================
-        st.info(f"Environment: **{condition}** - The path has been recalculated to avoid high-cost routes.")
+        st.info(f"Condition: **{condition}** | Strategy: **{condition_map[condition]['desc']}**")
         
         res1, res2 = st.columns([1, 2])
         
         with res1:
-            st.metric("Total Route Distance", f"{total_sum:.2f} km")
-            st.write("### 🧭 Step-by-Step Path Calculation")
+            st.metric("Total Route Distance", f"{total_dist_sum:.2f} km")
+            st.write("### 🧭 Step-by-Step Breakdown")
             for step in final_steps:
                 st.write(f"➡ **{step['u']}** → **{step['v']}** = `{step['dist']:.2f} km`")
                 st.divider()
@@ -126,16 +124,16 @@ if st.button("🚀 Calculate Optimized Path"):
         with res2:
             m = folium.Map(location=coords[start_node], zoom_start=11)
             
-            # Draw Path
+            # Draw Dynamic Path
             pts = [coords[city] for city in path]
-            folium.PolyLine(pts, color=route_color, weight=7, opacity=0.8).add_to(m)
+            folium.PolyLine(pts, color=route_color, weight=6, opacity=0.8).add_to(m)
 
             # Markers
             for i, city in enumerate(path):
                 if i == 0:
-                    folium.Marker(coords[city], popup=f"SOURCE: {city}", icon=folium.Icon(color='green')).add_to(m)
+                    folium.Marker(coords[city], popup=f"START: {city}", icon=folium.Icon(color='green')).add_to(m)
                 elif i == len(path)-1:
-                    folium.Marker(coords[city], popup=f"DESTINATION: {city}", icon=folium.Icon(color='red')).add_to(m)
+                    folium.Marker(coords[city], popup=f"END: {city}", icon=folium.Icon(color='red')).add_to(m)
                 else:
                     folium.Marker(coords[city], popup=f"STOP: {city}", icon=folium.Icon(color='blue')).add_to(m)
 
@@ -149,11 +147,11 @@ if st.button("🚀 Calculate Optimized Path"):
                  <span style="color: blue;">●</span> Middle Node<br>
                  <span style="color: red;">●</span> Destination Node<br>
                  <span style="color: {route_color};"><b>—</b></span> <b>{condition} Path</b>
-                 <br><small>Path selected based on lowest environment cost.</small>
+                 <br><small>Path intelligently rerouted based on road cost.</small>
                  </div>
                  """
             m.get_root().html.add_child(folium.Element(legend_html))
             components.html(m._repr_html_(), height=800)
 
     except nx.NetworkXNoPath:
-        st.error("No path found. The destination is unreachable under current environmental penalties.")
+        st.error("No path found. Roads are too heavily blocked.")
