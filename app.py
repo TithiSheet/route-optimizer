@@ -124,7 +124,7 @@ if st.button("🚀 Calculate Dynamic Route"):
         # =========================
         # 5. DISPLAY
         # =========================
-        st.info(f"Environment: **{condition}** | Route path re-calculated to find optimal detour.")
+        st.info(f"Environment: **{condition}**.")
         
         res1, res2 = st.columns([1, 2])
         
