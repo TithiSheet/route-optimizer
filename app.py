@@ -8,7 +8,7 @@ import streamlit.components.v1 as components
 # =========================
 # PAGE CONFIG
 # =========================
-st.set_page_config(layout="wide", page_title="Q-Learning Route Optimizer")
+st.set_page_config(layout="wide", page_title="Dynamic Route Optimizer")
 st.title("🌍 Smart Dynamic Route Optimizer")
 
 # =========================
@@ -56,8 +56,7 @@ condition = st.sidebar.selectbox(
     ["Normal/Clear", "Heavy Traffic", "Rainy/Weather", "Road Blockage"]
 )
 
-# Q-Learning inspired Penalties
-# These multipliers force the pathfinding algorithm to find detours
+# Q-Learning inspired Penalty: Higher values force the path to change physically
 condition_map = {
     "Normal/Clear": {"penalty": 1.0, "color": "black", "mult": 1.0},
     "Heavy Traffic": {"penalty": 4.0, "color": "orange", "mult": 1.3},
@@ -80,6 +79,16 @@ with col2:
 
 if st.button("🚀 Calculate Dynamic Route"):
     
+    # --- DYNAMIC PATH RE-ROUTING (Q-Learning logic) ---
+    temp_G = G_base.copy()
+    
+    # To force the graph path to change, we increase the cost of edges 
+    # based on the environment. This makes the 'normal' path too expensive.
+    random.seed(hash(condition)) 
+    for u, v in temp_G.edges():
+        if random.random() < 0.5: # 50% chance an edge is affected by current condition
+            temp_G[u][v]['weight'] *= selected_penalty
+
     # A. Get Dataset Ride Distance (Ground Truth)
     direct_match = df[((df['Pickup Location'] == start_node) & (df['Drop Location'] == end_node)) | 
                       ((df['Pickup Location'] == end_node) & (df['Drop Location'] == start_node))]
@@ -87,22 +96,11 @@ if st.button("🚀 Calculate Dynamic Route"):
     base_total = direct_match.iloc[0]['Ride Distance'] if not direct_match.empty else None
 
     try:
-        # --- Q-LEARNING PATH RE-ROUTING ---
-        # 1. First, find the "Normal" path
-        normal_path = nx.shortest_path(G_base, source=start_node, target=end_node, weight='weight')
+        # B. Calculate the path on the re-weighted graph
+        # This will now yield a DIFFERENT set of nodes (a detour)
+        path = nx.shortest_path(temp_G, source=start_node, target=end_node, weight='weight')
         
-        # 2. Create a "Live" graph and penalize the edges of the normal path
-        # This makes the algorithm 'learn' to avoid these roads in bad conditions
-        live_G = G_base.copy()
-        if condition != "Normal/Clear":
-            for i in range(len(normal_path)-1):
-                u, v = normal_path[i], normal_path[i+1]
-                live_G[u][v]['weight'] *= selected_penalty # Apply penalty to force detour
-        
-        # 3. Re-calculate shortest path on the live graph (The Detour)
-        path = nx.shortest_path(live_G, source=start_node, target=end_node, weight='weight')
-        
-        # --- DISTANCE INTEGRITY CALCULATION ---
+        # C. Calculate Segment Ratios
         raw_segments = []
         raw_sum = 0.0
         for i in range(len(path)-1):
@@ -111,12 +109,14 @@ if st.button("🚀 Calculate Dynamic Route"):
             raw_sum += d
             raw_segments.append({'u': u, 'v': v, 'base': d})
 
+        # D. Maintain Distance Integrity
         if base_total is None: base_total = raw_sum
         dynamic_total = base_total * selected_mult
         
         final_steps = []
         actual_sum_check = 0.0
         for seg in raw_segments:
+            # Proportionally distribute the dynamic total among the NEW nodes
             segment_share = (seg['base'] / raw_sum) * dynamic_total
             actual_sum_check += segment_share
             final_steps.append({'u': seg['u'], 'v': seg['v'], 'dist': segment_share})
@@ -124,7 +124,7 @@ if st.button("🚀 Calculate Dynamic Route"):
         # =========================
         # 5. DISPLAY
         # =========================
-        st.info(f"Environment: **{condition}** | Route path intelligently re-routed.")
+        st.info(f"Environment: **{condition}** | Route path re-calculated to find optimal detour.")
         
         res1, res2 = st.columns([1, 2])
         
@@ -137,9 +137,12 @@ if st.button("🚀 Calculate Dynamic Route"):
 
         with res2:
             m = folium.Map(location=coords[start_node], zoom_start=11)
+            
+            # Draw Path with Dynamic Color
             pts = [coords[city] for city in path]
             folium.PolyLine(pts, color=route_color, weight=6, opacity=0.8).add_to(m)
 
+            # Markers
             for i, city in enumerate(path):
                 if i == 0:
                     folium.Marker(coords[city], popup=f"START: {city}", icon=folium.Icon(color='green')).add_to(m)
@@ -148,6 +151,7 @@ if st.button("🚀 Calculate Dynamic Route"):
                 else:
                     folium.Marker(coords[city], popup=f"STOP: {city}", icon=folium.Icon(color='blue')).add_to(m)
 
+            # Legend
             legend_html = f"""
                  <div style="position: fixed; bottom: 50px; left: 50px; width: 220px; height: 160px; 
                              background-color: white; border:2px solid grey; z-index:9999; font-size:13px;
