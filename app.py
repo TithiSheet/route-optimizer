@@ -53,7 +53,7 @@ coords = get_coords(cities)
 st.sidebar.header("🛠 Route Conditions")
 condition = st.sidebar.selectbox(
     "Current Environment",
-    ["Normal/Clear", "Heavy Traffic", "Rainy/Weather", "Road Blockage"]
+    ["Normal/Clear", "Road Blockage"]
 )
 
 # Q-Learning inspired Penalty: Higher values force the path to change physically
