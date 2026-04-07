@@ -56,12 +56,12 @@ condition = st.sidebar.selectbox(
     ["Normal/Clear", "Heavy Traffic", "Rainy/Weather", "Road Blockage"]
 )
 
-# Multipliers for dynamic edge weight adjustment
+# Define multipliers based on conditions
 condition_map = {
     "Normal/Clear": {"mult": 1.0, "color": "black"},
-    "Heavy Traffic": {"mult": 3.0, "color": "orange"},
-    "Rainy/Weather": {"mult": 2.0, "color": "blue"},
-    "Road Blockage": {"mult": 10.0, "color": "red"}
+    "Heavy Traffic": {"mult": 1.3, "color": "orange"},
+    "Rainy/Weather": {"mult": 1.15, "color": "blue"},
+    "Road Blockage": {"mult": 1.8, "color": "red"}
 }
 
 selected_mult = condition_map[condition]["mult"]
@@ -76,39 +76,51 @@ with col1:
 with col2:
     end_node = st.selectbox("🔴 Destination Node", cities, index=1)
 
-if st.button("🚀 Calculate Dynamic Route"):
+if st.button("Route Calculation "):
     
-    # Create a copy of the graph to apply dynamic changes
-    dynamic_G = G_base.copy()
+    # A. Get Dataset Ride Distance
+    direct_match = df[((df['Pickup Location'] == start_node) & (df['Drop Location'] == end_node)) | 
+                      ((df['Pickup Location'] == end_node) & (df['Drop Location'] == start_node))]
     
-    # To force a path change, we apply the multiplier to a random 30% of edges
-    # This simulates certain roads being affected while others are not.
-    if condition != "Normal/Clear":
-        random.seed(random.randint(1, 1000)) # Change seed to get different blocks each click
-        edges = list(dynamic_G.edges())
-        affected_edges = random.sample(edges, int(len(edges) * 0.3))
-        for u, v in affected_edges:
-            dynamic_G[u][v]['weight'] *= selected_mult
+    if direct_match.empty:
+        st.warning("No direct distance in dataset. Using calculated shortest path.")
+        base_total = None
+    else:
+        # Ground Truth from CSV
+        base_total = direct_match.iloc[0]['Ride Distance']
 
     try:
-        # B. Calculate SHORTEST PATH based on the new weights
-        path = nx.shortest_path(dynamic_G, source=start_node, target=end_node, weight='weight')
+        # B. Shortest Path
+        path = nx.shortest_path(G_base, source=start_node, target=end_node, weight='weight')
         
-        # C. Calculate distances for the breakdown
-        # We show the modified weight to reflect the environmental impact
+        # C. Calculate Segment Ratios
+        raw_segments = []
+        raw_sum = 0.0
+        for i in range(len(path)-1):
+            u, v = path[i], path[i+1]
+            d = G_base[u][v]['weight']
+            raw_sum += d
+            raw_segments.append({'u': u, 'v': v, 'base': d})
+
+        # D. Apply Dynamic Multiplier to the Dataset Total
+        if base_total is None: base_total = raw_sum
+        
+        dynamic_total = base_total * selected_mult
+        
+        # E. Fragment the Dynamic Total into segments
         final_steps = []
         actual_sum_check = 0.0
         
-        for i in range(len(path)-1):
-            u, v = path[i], path[i+1]
-            seg_dist = dynamic_G[u][v]['weight']
-            actual_sum_check += seg_dist
-            final_steps.append({'u': u, 'v': v, 'dist': seg_dist})
+        for seg in raw_segments:
+            # Proportionally distribute the dynamic total
+            segment_share = (seg['base'] / raw_sum) * dynamic_total
+            actual_sum_check += segment_share
+            final_steps.append({'u': seg['u'], 'v': seg['v'], 'dist': segment_share})
 
         # =========================
         # 5. DISPLAY
         # =========================
-        st.info(f"Condition: **{condition}**. System optimized the route to avoid affected areas.")
+        st.info(f"Condition Applied: **{condition}**")
         
         res1, res2 = st.columns([1, 2])
         
@@ -120,9 +132,10 @@ if st.button("🚀 Calculate Dynamic Route"):
                 st.divider()
 
         with res2:
+            # INCREASED SIZE: Map is now 800px high for better visibility
             m = folium.Map(location=coords[start_node], zoom_start=11)
             
-            # Draw Path
+            # Draw Path with Dynamic Color
             pts = [coords[city] for city in path]
             folium.PolyLine(pts, color=route_color, weight=6, opacity=0.8).add_to(m)
 
@@ -145,12 +158,13 @@ if st.button("🚀 Calculate Dynamic Route"):
                  <span style="color: blue;">●</span> Middle Node<br>
                  <span style="color: red;">●</span> Destination Node<br>
                  <span style="color: {route_color};"><b>—</b></span> <b>{condition} Path</b>
-                 <br><small>Route adjusted dynamically for environment.</small>
+                 
                  </div>
                  """
             m.get_root().html.add_child(folium.Element(legend_html))
             
+            # Height increased to 800 for the larger view you requested
             components.html(m._repr_html_(), height=800)
 
     except nx.NetworkXNoPath:
-        st.error("No path found. The environment has blocked all available routes.")
+        st.error("No path found.")
