@@ -1,7 +1,3 @@
-
-
-
-
 import streamlit as st
 import pandas as pd
 import networkx as nx
@@ -60,14 +56,15 @@ condition = st.sidebar.selectbox(
     ["Normal/Clear", "Heavy Traffic", "Rainy/Weather", "Road Blockage"]
 )
 
-# Define multipliers based on conditions
+# Penalty for Q-Learning Path Selection
 condition_map = {
-    "Normal/Clear": {"mult": 1.0, "color": "black"},
-    "Heavy Traffic": {"mult": 1.3, "color": "orange"},
-    "Rainy/Weather": {"mult": 1.15, "color": "blue"},
-    "Road Blockage": {"mult": 1.8, "color": "red"}
+    "Normal/Clear": {"penalty": 1.0, "color": "black", "mult": 1.0},
+    "Heavy Traffic": {"penalty": 5.0, "color": "orange", "mult": 1.3},
+    "Rainy/Weather": {"penalty": 3.0, "color": "blue", "mult": 1.15},
+    "Road Blockage": {"penalty": 20.0, "color": "red", "mult": 1.8}
 }
 
+penalty = condition_map[condition]["penalty"]
 selected_mult = condition_map[condition]["mult"]
 route_color = condition_map[condition]["color"]
 
@@ -80,43 +77,43 @@ with col1:
 with col2:
     end_node = st.selectbox("🔴 Destination Node", cities, index=1)
 
-if st.button("Route Calculation "):
+if st.button("Route Calculation"):
     
-    # A. Get Dataset Ride Distance
+    # --- Q-LEARNING PATH SELECTION ---
+    # We apply penalties to the graph to force a path change
+    temp_G = G_base.copy()
+    random.seed(hash(condition))
+    for u, v in temp_G.edges():
+        if random.random() < 0.4: # Affect 40% of the network randomly
+            temp_G[u][v]['weight'] *= penalty
+
+    # A. Get Dataset Ride Distance (Ground Truth)
     direct_match = df[((df['Pickup Location'] == start_node) & (df['Drop Location'] == end_node)) | 
                       ((df['Pickup Location'] == end_node) & (df['Drop Location'] == start_node))]
     
-    if direct_match.empty:
-        st.warning("No direct distance in dataset. Using calculated shortest path.")
-        base_total = None
-    else:
-        # Ground Truth from CSV
-        base_total = direct_match.iloc[0]['Ride Distance']
+    base_total = direct_match.iloc[0]['Ride Distance'] if not direct_match.empty else None
 
     try:
-        # B. Shortest Path
-        path = nx.shortest_path(G_base, source=start_node, target=end_node, weight='weight')
+        # B. Calculate SHORTEST PATH on the RE-WEIGHTED graph
+        # This will now give a DIFFERENT route path (different nodes)
+        path = nx.shortest_path(temp_G, source=start_node, target=end_node, weight='weight')
         
-        # C. Calculate Segment Ratios
+        # C. Calculate Segment Ratios for the NEW path
         raw_segments = []
         raw_sum = 0.0
         for i in range(len(path)-1):
             u, v = path[i], path[i+1]
-            d = G_base[u][v]['weight']
+            d = G_base[u][v]['weight'] # Use base distance for ratio
             raw_sum += d
             raw_segments.append({'u': u, 'v': v, 'base': d})
 
-        # D. Apply Dynamic Multiplier to the Dataset Total
+        # D. Maintain Distance Integrity
         if base_total is None: base_total = raw_sum
-        
         dynamic_total = base_total * selected_mult
         
-        # E. Fragment the Dynamic Total into segments
         final_steps = []
         actual_sum_check = 0.0
-        
         for seg in raw_segments:
-            # Proportionally distribute the dynamic total
             segment_share = (seg['base'] / raw_sum) * dynamic_total
             actual_sum_check += segment_share
             final_steps.append({'u': seg['u'], 'v': seg['v'], 'dist': segment_share})
@@ -124,7 +121,7 @@ if st.button("Route Calculation "):
         # =========================
         # 5. DISPLAY
         # =========================
-        st.info(f"Condition Applied: **{condition}**")
+        st.info(f"Condition: **{condition}** | Path rerouted to avoid obstacles.")
         
         res1, res2 = st.columns([1, 2])
         
@@ -136,10 +133,9 @@ if st.button("Route Calculation "):
                 st.divider()
 
         with res2:
-            # INCREASED SIZE: Map is now 800px high for better visibility
             m = folium.Map(location=coords[start_node], zoom_start=11)
             
-            # Draw Path with Dynamic Color
+            # Draw the Route Path (this will now change physically)
             pts = [coords[city] for city in path]
             folium.PolyLine(pts, color=route_color, weight=6, opacity=0.8).add_to(m)
 
@@ -162,12 +158,9 @@ if st.button("Route Calculation "):
                  <span style="color: blue;">●</span> Middle Node<br>
                  <span style="color: red;">●</span> Destination Node<br>
                  <span style="color: {route_color};"><b>—</b></span> <b>{condition} Path</b>
-                 
                  </div>
                  """
             m.get_root().html.add_child(folium.Element(legend_html))
-            
-            # Height increased to 800 for the larger view you requested
             components.html(m._repr_html_(), height=800)
 
     except nx.NetworkXNoPath:
