@@ -9,7 +9,7 @@ import streamlit.components.v1 as components
 # PAGE CONFIG
 # =========================
 st.set_page_config(layout="wide", page_title="Dynamic Route Optimizer")
-st.title("🌍 Smart Dynamic Route Optimizer")
+st.title("🌍 Smart Route Optimizer")
 
 # =========================
 # 1. LOAD DATA
@@ -77,7 +77,7 @@ with col1:
 with col2:
     end_node = st.selectbox("🔴 Destination Node", cities, index=cities.index("AIIMS") if "AIIMS" in cities else 1)
 
-if st.button("🚀 Calculate Dynamic Route"):
+if st.button("Calculate Route"):
     
     # --- DYNAMIC PATH RE-ROUTING (Q-Learning logic) ---
     temp_G = G_base.copy()
