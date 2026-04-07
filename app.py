@@ -56,15 +56,15 @@ condition = st.sidebar.selectbox(
     ["Normal/Clear", "Heavy Traffic", "Rainy/Weather", "Road Blockage"]
 )
 
-# Penalty for Q-Learning Path Selection
+# Q-Learning Penalty: Higher penalty forces the algorithm to find a DIFFERENT path
 condition_map = {
     "Normal/Clear": {"penalty": 1.0, "color": "black", "mult": 1.0},
-    "Heavy Traffic": {"penalty": 5.0, "color": "orange", "mult": 1.3},
-    "Rainy/Weather": {"penalty": 3.0, "color": "blue", "mult": 1.15},
-    "Road Blockage": {"penalty": 20.0, "color": "red", "mult": 1.8}
+    "Heavy Traffic": {"penalty": 3.0, "color": "orange", "mult": 1.3},
+    "Rainy/Weather": {"penalty": 2.0, "color": "blue", "mult": 1.15},
+    "Road Blockage": {"penalty": 10.0, "color": "red", "mult": 1.8}
 }
 
-penalty = condition_map[condition]["penalty"]
+selected_penalty = condition_map[condition]["penalty"]
 selected_mult = condition_map[condition]["mult"]
 route_color = condition_map[condition]["color"]
 
@@ -79,13 +79,18 @@ with col2:
 
 if st.button("Route Calculation"):
     
-    # --- Q-LEARNING PATH SELECTION ---
-    # We apply penalties to the graph to force a path change
+    # --- DYNAMIC PATH RE-ROUTING LOGIC ---
+    # We create a temporary graph for pathfinding
     temp_G = G_base.copy()
-    random.seed(hash(condition))
+    
+    # Apply Q-Learning inspired "Edge Costs"
+    # If the condition is not "Normal", we increase the cost of the standard roads
+    # to force the algorithm to pick a detour.
+    random.seed(hash(condition)) 
     for u, v in temp_G.edges():
-        if random.random() < 0.4: # Affect 40% of the network randomly
-            temp_G[u][v]['weight'] *= penalty
+        # Randomly apply high costs to simulate specific blocked/congested roads
+        if random.random() < 0.4: 
+            temp_G[u][v]['weight'] *= selected_penalty
 
     # A. Get Dataset Ride Distance (Ground Truth)
     direct_match = df[((df['Pickup Location'] == start_node) & (df['Drop Location'] == end_node)) | 
@@ -94,16 +99,16 @@ if st.button("Route Calculation"):
     base_total = direct_match.iloc[0]['Ride Distance'] if not direct_match.empty else None
 
     try:
-        # B. Calculate SHORTEST PATH on the RE-WEIGHTED graph
-        # This will now give a DIFFERENT route path (different nodes)
+        # B. Find NEW shortest path on the modified graph
+        # This will now physically change the path on the map
         path = nx.shortest_path(temp_G, source=start_node, target=end_node, weight='weight')
         
-        # C. Calculate Segment Ratios for the NEW path
+        # C. Calculate Segment Ratios
         raw_segments = []
         raw_sum = 0.0
         for i in range(len(path)-1):
             u, v = path[i], path[i+1]
-            d = G_base[u][v]['weight'] # Use base distance for ratio
+            d = G_base[u][v]['weight'] # Use original weight for distance ratio
             raw_sum += d
             raw_segments.append({'u': u, 'v': v, 'base': d})
 
@@ -121,7 +126,7 @@ if st.button("Route Calculation"):
         # =========================
         # 5. DISPLAY
         # =========================
-        st.info(f"Condition: **{condition}** | Path rerouted to avoid obstacles.")
+        st.info(f"Environment: **{condition}** | Route path intelligently re-calculated.")
         
         res1, res2 = st.columns([1, 2])
         
@@ -135,7 +140,7 @@ if st.button("Route Calculation"):
         with res2:
             m = folium.Map(location=coords[start_node], zoom_start=11)
             
-            # Draw the Route Path (this will now change physically)
+            # Draw the Route Line (this will now move to different nodes)
             pts = [coords[city] for city in path]
             folium.PolyLine(pts, color=route_color, weight=6, opacity=0.8).add_to(m)
 
@@ -164,4 +169,4 @@ if st.button("Route Calculation"):
             components.html(m._repr_html_(), height=800)
 
     except nx.NetworkXNoPath:
-        st.error("No path found.")
+        st.error("No alternative path found under these severe conditions.")
