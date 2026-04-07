@@ -59,8 +59,8 @@ condition = st.sidebar.selectbox(
 # Q-Learning inspired Penalty: Higher values force the path to change physically
 condition_map = {
     "Normal/Clear": {"penalty": 1.0, "color": "black", "mult": 1.0},
-    "Heavy Traffic": {"penalty": 4.0, "color": "orange", "mult": 1.3},
-    "Rainy/Weather": {"penalty": 2.5, "color": "blue", "mult": 1.15},
+    #"Heavy Traffic": {"penalty": 4.0, "color": "orange", "mult": 1.3},
+    #"Rainy/Weather": {"penalty": 2.5, "color": "blue", "mult": 1.15},
     "Road Blockage": {"penalty": 15.0, "color": "red", "mult": 1.8}
 }
 
