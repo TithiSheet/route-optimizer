@@ -77,7 +77,7 @@ with col1:
 with col2:
     end_node = st.selectbox("🔴 Destination Node", cities, index=cities.index("AIIMS") if "AIIMS" in cities else 1)
 
-if st.button("Calculate Route"):
+if st.button("🛣️ Start Navigation"):
     
     # --- DYNAMIC PATH RE-ROUTING (Q-Learning logic) ---
     temp_G = G_base.copy()
