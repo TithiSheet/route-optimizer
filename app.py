@@ -124,7 +124,7 @@ if st.button("🛣️ Start Navigation"):
         # =========================
         # 5. DISPLAY
         # =========================
-        st.info(f"Environment: **{condition}**.")
+        st.info(f"Environmentss: **{condition}**.")
         
         res1, res2 = st.columns([1, 2])
         
